@@ -21,9 +21,6 @@ class Actor():
         self.learner = learner
         self.set_policy = SetPolicyWeights(self.learner.session, tf.trainable_variables())
 
-        # # we will start by running (args.timesteps_per_batch / 1000) episodes for the first iteration
-        # self.average_timesteps_in_episode = 1000
-
         self.ordering = {"obs":0, "action_dists_mu":1, "action_dists_logstd":2, "rewards":3, "actions":4,  "returns":5, "advantage":5}
 
     def set_policy_weights(self, parameters):

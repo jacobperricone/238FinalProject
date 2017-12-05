@@ -53,8 +53,6 @@ else:
     # starting_weights = None
     new_policy_weights = None
 actor = Actor(args, args.monitor, learner, learner_env)
-# starting_weights = comm.bcast(starting_weights, root=0)
-# actor.set_policy_weights(starting_weights)
 
 start_time = time.time()
 history = {}
@@ -165,7 +163,6 @@ while True:
             with open("%s-%s-%f-%f-%f-%f" % (args.task, args.decay_method, starting_timesteps, starting_kl, args.timestep_adapt, args.kl_adapt), "w") as outfile:
                 json.dump(history,outfile)
 
-        # totalsteps += args.timesteps_per_batch
         totalsteps += stats["Timesteps"]
         print(("%d total steps have happened (Elapsed time = %.3f s)" % (totalsteps,time.time() - start_time)))
         sys.stdout.flush()
