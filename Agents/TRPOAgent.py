@@ -2,8 +2,7 @@ import numpy as np
 import tensorflow as tf
 import gym
 from utils import *
-from rollouts import *
-from value_function import *
+from Networks.Baselines import *
 import time
 import os
 import logging
@@ -11,15 +10,20 @@ import random
 
 
 class TRPO():
-    def __init__(self, args, observation_space, action_space):
-        self.observation_space = observation_space
-        self.action_space = action_space
+    def __init__(self, args, env):
+        self.observation_space = env.observation_space
+        self.action_space =env.action_space
+        self.env = env
         self.args = args
+        self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
+                         "returns": 5, "advantage": 5}
+        self.init_net()
+        self.init_work()
 
+
+    def init_net(self):
         # previously this was all part of makeModel(self) . . .
         self.observation_size = self.observation_space.shape[0]
-        # self.observation_shape =  list(self.observation_space.shape)
-        # print(self.observation_shape)
         self.action_size = int(np.prod(self.action_space.shape))
         self.hidden_size = 64
 
@@ -30,7 +34,6 @@ class TRPO():
             device_count={'GPU': 0}
         )
         self.session = tf.Session(config=config)
-
         self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
         self.action = tf.placeholder(tf.float32, [None, self.action_size])
         self.advantage = tf.placeholder(tf.float32, [None])
@@ -85,6 +88,8 @@ class TRPO():
             param = tf.reshape(self.flat_tangent[start:(start + size)], shape)
             tangents.append(param)
             start += size
+
+
         # gradient of KL w/ itself * tangent
         gvp = [tf.reduce_sum(g * t) for (g, t) in zip(grads, tangents)]
         # 2nd gradient of KL w/ itself * tangent
@@ -96,25 +101,74 @@ class TRPO():
         self.session.run(tf.global_variables_initializer())
         # value function
         # self.vf = VF(self.session)
-        self.vf = LinearVF()
+        self.vf = LinearVF(self.ordering)
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
-    def learn(self, paths):
-        # is it possible to replace A(s,a) with Q(s,a)?
-        for path in paths:
-            path["baseline"] = self.vf.predict(path)
-            path["returns"] = discount(path["rewards"], self.args.gamma)
-            path["advantage"] = path["returns"] - path["baseline"]
-            # path["advantage"] = path["returns"]
+    def init_work(self):
+        if self.args.monitor:
+            self.env.monitor.start('monitor/', force=True)
 
-        # puts all the experiences in a matrix: total_timesteps x options
-        action_dist_mu = np.concatenate([path["action_dists_mu"] for path in paths])
-        action_dist_logstd = np.concatenate([path["action_dists_logstd"] for path in paths])
-        obs_n = np.concatenate([path["obs"] for path in paths])
-        action_n = np.concatenate([path["actions"] for path in paths])
+        self.set_policy = SetPolicyWeights(self.session, tf.trainable_variables())
+        self.average_timesteps_in_episode = 1000
+
+    def set_policy_weights(self, parameters):
+        self.set_policy(parameters)
+
+
+    def act(self, obs):
+        obs = np.expand_dims(obs, 0)
+        action_dist_mu, action_dist_logstd = self.session.run([self.action_dist_mu, self.action_dist_logstd], feed_dict={self.obs: obs})
+
+        act = action_dist_mu + np.exp(action_dist_logstd)*np.random.randn(*action_dist_logstd.shape)
+        return act.ravel(), action_dist_mu, action_dist_logstd
+
+
+    def episode(self):
+        obs, actions, rewards, action_dists_mu, action_dists_logstd = [], [], [], [], []
+        ob = list(filter(self.env.reset()))
+        for i in range(self.args.max_pathlength - 1):
+            obs.append(ob)
+            action, action_dist_mu, action_dist_logstd = self.act(ob)
+            actions.append(action)
+            action_dists_mu.append(action_dist_mu)
+            action_dists_logstd.append(action_dist_logstd)
+            res = self.env.step(int(action))
+            ob = list(filter(res[0]))
+            rewards.append((res[1]))
+            if res[2] or i == self.args.max_pathlength - 2:
+                obs = np.expand_dims(obs, 0)
+                path = list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd]))
+                rewards = np.array(rewards)
+                returns = discount(rewards, self.args.gamma)
+                advantage = np.array(rewards) - self.vf.predict(path[0],len(rewards))
+                path.extend([rewards, np.array(actions), returns, advantage])
+                return path
+
+
+    def rollout(self, num_timesteps):
+        paths = []
+        steps = 0
+        episode = 0
+        while steps < num_timesteps:
+            # print("Running an episode after completing {} timesteps".format(steps))
+            # sys.stdout.flush()
+            paths.append(self.episode())
+            steps += len(paths[episode][self.ordering["rewards"]])
+            episode += 1
+
+        self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
+        return paths
+
+
+
+    def learn(self, paths):
+        action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])
+        action_dist_logstd = np.concatenate([path[self.ordering["action_dists_logstd"]] for path in paths])
+        obs_n = np.concatenate([path[self.ordering["obs"]] for path in paths])
+        action_n = np.concatenate([path[self.ordering["actions"]] for path in paths])
 
         # standardize to mean 0 stddev 1
-        advant_n = np.concatenate([path["advantage"] for path in paths])
+        advant_n = np.concatenate([path[self.ordering["advantage"]] for path in paths])
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
 
@@ -165,21 +219,16 @@ class TRPO():
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
-        episoderewards = np.array(
-            [path["rewards"].sum() for path in paths])
+        # episoderewards = np.array([path["rewards"].sum() for path in paths])
+        episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
         stats = {}
         stats["Average sum of rewards per episode"] = episoderewards.mean()
         stats["Entropy"] = entropy_after
-        stats["max KL"] = self.args.max_kl
-        stats["Timesteps"] = sum([len(path["rewards"]) for path in paths])
-        # stats["Time elapsed"] = "%.2f mins" % ((time.time() - start_time) / 60.0)
+        stats["Max KL"] = self.args.max_kl
+        stats["Timesteps"] = sum([len(path[self.ordering["rewards"]]) for path in paths])
         stats["KL between old and new distribution"] = kl_after
         stats["Surrogate loss"] = surrogate_after
-        # print ("\n********** Iteration {} ************".format(i))
-        for k, v in stats.items():
-            print("{} : {:e}".format(k, v))
-        return stats["Average sum of rewards per episode"]
-
+        return stats
     def get_starting_weights(self):
         return self.get_policy()
 
