@@ -101,6 +101,7 @@ class TRPO():
         self.session.run(tf.global_variables_initializer())
         # value function
         # self.vf = VF(self.session)
+
         self.vf = LinearVF(self.ordering)
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
@@ -162,6 +163,7 @@ class TRPO():
 
 
     def learn(self, paths):
+        # puts all the experiences in a matrix: total_timesteps x options
         action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])
         action_dist_logstd = np.concatenate([path[self.ordering["action_dists_logstd"]] for path in paths])
         obs_n = np.concatenate([path[self.ordering["obs"]] for path in paths])
@@ -229,6 +231,7 @@ class TRPO():
         stats["KL between old and new distribution"] = kl_after
         stats["Surrogate loss"] = surrogate_after
         return stats
+
     def get_starting_weights(self):
         return self.get_policy()
 
@@ -237,5 +240,5 @@ class TRPO():
         return
 
     def update(self, paths):
-        mean_reward = self.learn(paths)
-        return self.get_policy(), mean_reward
+        stats = self.learn(paths)
+        return self.get_policy(), stats

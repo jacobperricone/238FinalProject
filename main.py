@@ -52,8 +52,6 @@ else:
     # starting_weights = None
     new_policy_weights = None
 
-
-
 start_time = time.time()
 history = {}
 history["rollout_time"] = []
@@ -81,16 +79,20 @@ while True:
     bcast_start = time.time()
     new_policy_weights = comm.bcast(new_policy_weights, root=0)
     learner.set_policy_weights(new_policy_weights)
+
     bcast_time = (time.time() - bcast_start)
 
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
+
     data = learner.rollout(args.timesteps_per_batch / size)
+
     rollout_time = (time.time() - rollout_start)
 
     # synchronization of experience
     gather_start = time.time()
     data = comm.gather(data, root=0)
+
     paths = []
     if rank == 0:
         paths = [item for sublist in data for item in sublist]

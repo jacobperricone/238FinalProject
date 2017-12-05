@@ -77,3 +77,4 @@ class LinearVF(object):
 
     def predict(self, obs, l):
         return np.zeros(l) if self.coeffs is None else self._features(obs,l).dot(self.coeffs)
+
