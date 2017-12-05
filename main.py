@@ -2,9 +2,8 @@ import numpy as np
 import tensorflow as tf
 import gym
 from utils import *
-from model import *
+from Agents.TRPOAgent import *
 import argparse
-from rollouts import *
 import json
 
 from mpi4py import MPI
@@ -20,6 +19,7 @@ sys.stdout.flush()
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 parser = argparse.ArgumentParser(description='TRPO.')
+
 
 # these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
@@ -45,14 +45,15 @@ if rank == 0:
 
 # initialize TRPO learner on all processes, distribute the starting weights
 learner_env = gym.make(args.task)
-learner = TRPO(args, learner_env.observation_space, learner_env.action_space)
+learner = TRPO(args, learner_env)
 if rank == 0:
     starting_weights = learner.get_starting_weights()
 else:
     starting_weights = None
+
 starting_weights = comm.bcast(starting_weights, root=0)
-actor = Actor(args, args.monitor, learner, learner_env)
-actor.set_policy_weights(starting_weights)
+learner.set_policy_weights(starting_weights)
+
 
 start_time = time.time()
 history = {}
@@ -72,12 +73,14 @@ starting_timesteps = args.timesteps_per_batch
 starting_kl = args.max_kl
 
 iteration = 0
+print("here")
 while True:
     iteration += 1
 
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
-    data = actor.rollout(args.timesteps_per_batch / size)
+    print("Initiating rollout")
+    data = learner.rollout(int(args.timesteps_per_batch / size))
 
     # synchronization of experience
     data = comm.gather(data,root=0)
@@ -165,7 +168,7 @@ while True:
 
     # synchronize new model and update actor weights locally
     new_policy_weights = comm.bcast(new_policy_weights, root=0)
-    actor.set_policy_weights(new_policy_weights)
+    learner.set_policy_weights(new_policy_weights)
 
 if rank == 0:
     print("Evaluation complete!")

@@ -39,17 +39,17 @@ class VF(object):
         ret = np.concatenate([o, act, al, np.ones((l, 1))], axis=1)
         return ret
 
-    def fit(self, paths):
-        featmat = np.concatenate([self._features(path) for path in paths])
+    def fit(self, paths, ordering):
+        featmat = np.concatenate([self._features(path, ordering) for path in paths])
         if self.net is None:
             self.create_net(featmat.shape[1])
-        returns = np.concatenate([path["returns"] for path in paths])
+        returns = np.concatenate([path[ordering["returns"]]for path in paths])
         for _ in range(50):
             self.session.run(self.train, {self.x: featmat, self.y: returns})
 
     def predict(self, path):
         if self.net is None:
-            return np.zeros(len(path["rewards"]))
+            return np.zeros(len(path[ordering["rewards"]]))
         else:
             ret = self.session.run(self.net, {self.x: self._features(path)})
             return np.reshape(ret, (ret.shape[0], ))
