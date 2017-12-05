@@ -3,6 +3,7 @@ import tensorflow as tf
 import gym
 from utils import *
 from Networks.Baselines import *
+from Networks.ContinuousPolicy import NetworkContinous
 import time
 import os
 import logging
@@ -12,7 +13,7 @@ import random
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
-        self.action_space =env.action_space
+        self.action_space = env.action_space
         self.env = env
         self.args = args
         self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
@@ -20,62 +21,30 @@ class TRPO():
         self.init_net()
         self.init_work()
 
-
     def init_net(self):
         # previously this was all part of makeModel(self) . . .
         self.observation_size = self.observation_space.shape[0]
         self.action_size = int(np.prod(self.action_space.shape))
-        self.hidden_size = 64
-
-        weight_init = tf.random_uniform_initializer(-0.05, 0.05)
-        bias_init = tf.constant_initializer(0)
-
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
+        # Initialize Policy Network
         self.session = tf.Session(config=config)
-        self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
-        self.action = tf.placeholder(tf.float32, [None, self.action_size])
-        self.advantage = tf.placeholder(tf.float32, [None])
-        self.oldaction_dist_mu = tf.placeholder(tf.float32, [None, self.action_size])
-        self.oldaction_dist_logstd = tf.placeholder(tf.float32, [None, self.action_size])
+        self.net = NetworkContinous("continuous_policy", self.observation_size, self.action_size)
 
-        with tf.variable_scope("policy"):
-            h1 = fully_connected(self.obs, self.observation_size, self.hidden_size, weight_init, bias_init, "policy_h1")
-            h1 = tf.nn.relu(h1)
-            h2 = fully_connected(h1, self.hidden_size, self.hidden_size, weight_init, bias_init, "policy_h2")
-            h2 = tf.nn.relu(h2)
-            h3 = fully_connected(h2, self.hidden_size, self.action_size, weight_init, bias_init, "policy_h3")
-            action_dist_logstd_param = tf.Variable((.01 * np.random.randn(1, self.action_size)).astype(np.float32),
-                                                   name="policy_logstd")
-        # means for each action
-        self.action_dist_mu = h3
-        # log standard deviations for each actions
-        self.action_dist_logstd = tf.tile(action_dist_logstd_param, tf.stack((tf.shape(self.action_dist_mu)[0], 1)))
-        batch_size = tf.shape(self.obs)[0]
-        # what are the probabilities of taking self.action, given new and old distributions
-        log_p_n = gauss_log_prob(self.action_dist_mu, self.action_dist_logstd, self.action)
-        log_oldp_n = gauss_log_prob(self.oldaction_dist_mu, self.oldaction_dist_logstd, self.action)
-
-        # tf.exp(log_p_n) / tf.exp(log_oldp_n)
-        ratio = tf.exp(log_p_n - log_oldp_n)
-        # importance sampling of surrogate loss (L in paper)
-        surr = -tf.reduce_mean(ratio * self.advantage)
-        var_list = tf.trainable_variables()
-
-        eps = 1e-8
-        batch_size_float = tf.cast(batch_size, tf.float32)
-        # kl divergence and shannon entropy
-        kl = gauss_KL(self.oldaction_dist_mu, self.oldaction_dist_logstd, self.action_dist_mu,
-                      self.action_dist_logstd) / batch_size_float
-        ent = gauss_ent(self.action_dist_mu, self.action_dist_logstd) / batch_size_float
-
+        # Calulate Surrogate Loss
+        surr = self.calculate_surrogate_loss()
+        kl, ent = self.calculate_KL_and_entropy()
         self.losses = [surr, kl, ent]
+
+        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
+        var_list = self.net.var_list
+
         # policy gradient
         self.pg = flatgrad(surr, var_list)
 
         # KL divergence w/ itself, with first argument kept constant.
-        kl_firstfixed = gauss_selfKL_firstfixed(self.action_dist_mu, self.action_dist_logstd) / batch_size_float
+        kl_firstfixed = gauss_selfKL_firstfixed(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
         # gradient of KL w/ itself
         grads = tf.gradients(kl_firstfixed, var_list)
         # what vector we're multiplying by
@@ -89,7 +58,6 @@ class TRPO():
             tangents.append(param)
             start += size
 
-
         # gradient of KL w/ itself * tangent
         gvp = [tf.reduce_sum(g * t) for (g, t) in zip(grads, tangents)]
         # 2nd gradient of KL w/ itself * tangent
@@ -100,28 +68,47 @@ class TRPO():
         self.sff = SetFromFlat(self.session, var_list)
         self.session.run(tf.global_variables_initializer())
         # value function
-        # self.vf = VF(self.session)
+
         self.vf = LinearVF(self.ordering)
         self.get_policy = GetPolicyWeights(self.session, var_list)
+
+    def calculate_surrogate_loss(self):
+        # what are the probabilities of taking self.action, given new and old distributions
+        log_p_n = gauss_log_prob(self.net.action_dist_mu, self.net.action_dist_logstd, self.net.action)
+        log_oldp_n = gauss_log_prob(self.net.oldaction_dist_mu, self.net.oldaction_dist_logstd, self.net.action)
+        # tf.exp(log_p_n) / tf.exp(log_oldp_n)
+        ratio = tf.exp(log_p_n - log_oldp_n)
+        # importance sampling of surrogate loss (L in paper)
+        surr = -tf.reduce_mean(ratio * self.net.advantage)
+        return surr
+
+    def calculate_KL_and_entropy(self):
+        eps = 1e-8
+        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
+        # kl divergence and shannon entropy
+        kl = gauss_KL(self.net.oldaction_dist_mu, self.net.oldaction_dist_logstd, self.net.action_dist_mu,
+                      self.net.action_dist_logstd) / batch_size_float
+        ent = gauss_ent(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
+
+        return kl, ent
 
     def init_work(self):
         if self.args.monitor:
             self.env.monitor.start('monitor/', force=True)
 
-        self.set_policy = SetPolicyWeights(self.session, tf.trainable_variables())
+        self.set_policy = SetPolicyWeights(self.session, self.net.var_list)
         self.average_timesteps_in_episode = 1000
 
     def set_policy_weights(self, parameters):
         self.set_policy(parameters)
 
-
     def act(self, obs):
         obs = np.expand_dims(obs, 0)
-        action_dist_mu, action_dist_logstd = self.session.run([self.action_dist_mu, self.action_dist_logstd], feed_dict={self.obs: obs})
+        action_dist_mu, action_dist_logstd = self.session.run([self.net.action_dist_mu, self.net.action_dist_logstd],
+                                                              feed_dict={self.net.obs: obs})
 
-        act = action_dist_mu + np.exp(action_dist_logstd)*np.random.randn(*action_dist_logstd.shape)
+        act = action_dist_mu + np.exp(action_dist_logstd) * np.random.randn(*action_dist_logstd.shape)
         return act.ravel(), action_dist_mu, action_dist_logstd
-
 
     def episode(self):
         obs, actions, rewards, action_dists_mu, action_dists_logstd = [], [], [], [], []
@@ -140,10 +127,9 @@ class TRPO():
                 path = list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd]))
                 rewards = np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
-                advantage = np.array(rewards) - self.vf.predict(path[0],len(rewards))
+                advantage = np.array(rewards) - self.vf.predict(path[0], len(rewards))
                 path.extend([rewards, np.array(actions), returns, advantage])
                 return path
-
 
     def rollout(self, num_timesteps):
         paths = []
@@ -159,8 +145,6 @@ class TRPO():
         self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
         return paths
 
-
-
     def learn(self, paths):
         action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])
         action_dist_logstd = np.concatenate([path[self.ordering["action_dists_logstd"]] for path in paths])
@@ -175,8 +159,11 @@ class TRPO():
         # train value function / baseline on rollout paths
         self.vf.fit(paths)
 
-        feed_dict = {self.obs: obs_n, self.action: action_n, self.advantage: advant_n,
-                     self.oldaction_dist_mu: action_dist_mu, self.oldaction_dist_logstd: action_dist_logstd}
+        feed_dict = {self.net.obs: obs_n,
+                     self.net.action: action_n,
+                     self.net.advantage: advant_n,
+                     self.net.oldaction_dist_mu: action_dist_mu,
+                     self.net.oldaction_dist_logstd: action_dist_logstd}
 
         # parameters
         thprev = self.gf()
@@ -229,6 +216,7 @@ class TRPO():
         stats["KL between old and new distribution"] = kl_after
         stats["Surrogate loss"] = surrogate_after
         return stats
+
     def get_starting_weights(self):
         return self.get_policy()
 
