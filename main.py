@@ -14,7 +14,7 @@ comm = MPI.COMM_WORLD
 cpu = MPI.Get_processor_name()
 rank = comm.Get_rank()
 size = comm.Get_size()
-print("hello world from processor {}, process {} out of {}".format(cpu,rank,size))
+print("Hello world from processor {}, process {} out of {}".format(cpu,rank,size))
 sys.stdout.flush()
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -23,8 +23,7 @@ parser = argparse.ArgumentParser(description='TRPO.')
 
 # these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
-# parser.add_argument("--timesteps_per_batch", type=int, default=40000)
-parser.add_argument("--timesteps_per_batch", type=int, default=2000)
+parser.add_argument("--timesteps_per_batch", type=int, default=40000)
 parser.add_argument("--n_steps", type=int, default=10000000)
 parser.add_argument("--n_iter", type=int, default=100)
 parser.add_argument("--gamma", type=float, default=.995)
@@ -44,28 +43,14 @@ if rank == 0:
     print(args)
     sys.stdout.flush()
 
-# # initialize TRPO learner on master process and distribute
-# if rank == 0:
-#     learner_env = gym.make(args.task)
-#     learner = TRPO(args, learner_env.observation_space, learner_env.action_space)
-#     starting_weights = learner.get_starting_weights()
-#     data = (starting_weights)
-# else:
-#     data = None
-# comm.Bcast(data, root=0)
-# if rank != 0:
-#     print(type(data))
-#     # learner = data[0]
-#     starting_weights = data[0]
-#     # learner_env = data[0]
-#     # learner = data[1]
-#     # starting_weights = data[2]
-
-# everyone initializes a learner and actor
+# initialize TRPO learner on all processes, distribute the starting weights
 learner_env = gym.make(args.task)
 learner = TRPO(args, learner_env.observation_space, learner_env.action_space)
-starting_weights = learner.get_starting_weights()
-
+if rank == 0:
+    starting_weights = learner.get_starting_weights()
+else:
+    starting_weights = None
+starting_weights = comm.bcast(starting_weights, root=0)
 actor = Actor(args, args.monitor, learner, learner_env)
 actor.set_policy_weights(starting_weights)
 
@@ -90,11 +75,9 @@ iteration = 0
 while True:
     iteration += 1
 
-    # runs a bunch of async processes that collect rollouts
-    actor.average_timesteps_in_episode = comm.allreduce(actor.average_timesteps_in_episode, op=MPI.MIN)
-    num_rollouts = max(int(actor.args.timesteps_per_batch / actor.average_timesteps_in_episode / size), 1)
+    # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
-    data = actor.rollout(num_rollouts)
+    data = actor.rollout(args.timesteps_per_batch / size)
 
     # synchronization of experience
     data = comm.gather(data,root=0)
@@ -104,18 +87,6 @@ while True:
             for j in range(0,len(data[i])):
                 paths.append(data[i][j])
     rollout_time = (time.time() - rollout_start)
-
-    # if rank == 0:
-    #     print("On rank {}:".format(rank))
-    #     print("type(data) = {}".format(type(data)))
-    #     print("type(data[0]) = {}".format(type(data[0])))
-    #     print("type(data[0][0]) = {}".format(type(data[0][0])))
-    #     print("type(data[0][0]['obs']) = {}".format(type(data[0][0]['obs'])))
-
-    #     print("type(paths) = {}".format(type(paths)))
-    #     print("type(paths[0]) = {}".format(type(paths[0])))
-    #     print("type(paths[0]['obs']) = {}".format(type(paths[0]['obs'])))
-    # sys.exit()
 
     # only master process does learning on TF graph
     if rank == 0:
@@ -138,41 +109,41 @@ while True:
 
         recent_total_reward += mean_reward
 
-        # if args.decay_method == "adaptive":
-        #     if iteration % 10 == 0:
-        #         if recent_total_reward < last_reward:
-        #             print("Policy is not improving. Decrease KL and increase steps.")
-        #             if args.timesteps_per_batch < 20000:
-        #                 args.timesteps_per_batch += args.timestep_adapt
-        #             if args.max_kl > 0.001:
-        #                 args.max_kl -= args.kl_adapt
-        #         else:
-        #             print("Policy is improving. Increase KL and decrease steps.")
-        #             if args.timesteps_per_batch > 1200:
-        #                 args.timesteps_per_batch -= args.timestep_adapt
-        #             if args.max_kl < 0.01:
-        #                 args.max_kl += args.kl_adapt
-        #         last_reward = recent_total_reward
-        #         recent_total_reward = 0
+        if args.decay_method == "adaptive":
+            if iteration % 10 == 0:
+                if recent_total_reward < last_reward:
+                    print("Policy is not improving. Decrease KL and increase steps.")
+                    if args.timesteps_per_batch < 20000:
+                        args.timesteps_per_batch += args.timestep_adapt
+                    if args.max_kl > 0.001:
+                        args.max_kl -= args.kl_adapt
+                else:
+                    print("Policy is improving. Increase KL and decrease steps.")
+                    if args.timesteps_per_batch > 1200:
+                        args.timesteps_per_batch -= args.timestep_adapt
+                    if args.max_kl < 0.01:
+                        args.max_kl += args.kl_adapt
+                last_reward = recent_total_reward
+                recent_total_reward = 0
 
-        # if args.decay_method == "adaptive-margin":
-        # if iteration % 10 == 0:
-        #     scaled_last = last_reward + abs(last_reward * 0.05)
-        #     print(("Last reward: %f Scaled: %f Recent: %f" % (last_reward, scaled_last, recent_total_reward)))
-        #     if recent_total_reward < scaled_last:
-        #         print("Policy is not improving. Decrease KL and increase steps.")
-        #         if args.timesteps_per_batch < 10000:
-        #             args.timesteps_per_batch += args.timestep_adapt
-        #         if args.max_kl > 0.001:
-        #             args.max_kl -= args.kl_adapt
-        #     else:
-        #         print("Policy is improving. Increase KL and decrease steps.")
-        #         if args.timesteps_per_batch > 1200:
-        #             args.timesteps_per_batch -= args.timestep_adapt
-        #         if args.max_kl < 0.01:
-        #             args.max_kl += args.kl_adapt
-        #     last_reward = recent_total_reward
-        #     recent_total_reward = 0
+        if args.decay_method == "adaptive-margin":
+            if iteration % 10 == 0:
+                scaled_last = last_reward + abs(last_reward * 0.05)
+                print(("Last reward: %f Scaled: %f Recent: %f" % (last_reward, scaled_last, recent_total_reward)))
+                if recent_total_reward < scaled_last:
+                    print("Policy is not improving. Decrease KL and increase steps.")
+                    if args.timesteps_per_batch < 10000:
+                        args.timesteps_per_batch += args.timestep_adapt
+                    if args.max_kl > 0.001:
+                        args.max_kl -= args.kl_adapt
+                else:
+                    print("Policy is improving. Increase KL and decrease steps.")
+                    if args.timesteps_per_batch > 1200:
+                        args.timesteps_per_batch -= args.timestep_adapt
+                    if args.max_kl < 0.01:
+                        args.max_kl += args.kl_adapt
+                last_reward = recent_total_reward
+                recent_total_reward = 0
 
         print(("Current steps is " + str(args.timesteps_per_batch) + " and KL is " + str(args.max_kl)))
 
@@ -186,22 +157,15 @@ while True:
 
         if iteration >= args.n_iter or totalsteps >= args.n_steps:
             break
-    # else:
-        # new_policy_weights = [None] * len(starting_weights)
-        # for i in range(0,len(starting_weights)):
-        #     new_policy_weights[i] = np.empty(starting_weights[i].shape)
-
-    ## THIS IS ALSO IN PROGRESS, MPI TO RECEIVE NEW WEIGHTS TO EACH PROCESS FROM ROOT
-    # print(len(starting_weights))
-    # print(len(new_policy_weights))
-    # print(len(starting_weights[1]))
-    # print(len(new_policy_weights[1]))
-
-    comm.Barrier()
-    sys.exit()
+    else:
+        new_policy_weights = None
+        totalsteps += args.timesteps_per_batch
+        if iteration >= args.n_iter or totalsteps >= args.n_steps:
+            break
 
     # synchronize new model and update actor weights locally
-    for i in range(0,len(new_policy_weights)):
-      comm.bcast(new_policy_weights[i], root=0)
-
+    new_policy_weights = comm.bcast(new_policy_weights, root=0)
     actor.set_policy_weights(new_policy_weights)
+
+if rank == 0:
+    print("Evaluation complete!")

@@ -1,5 +1,3 @@
-from mpi4py import MPI
-
 import numpy as np
 import tensorflow as tf
 import gym
@@ -10,21 +8,14 @@ import time
 import os
 import logging
 import random
-# import multiprocessing
 
-# class TRPO(multiprocessing.Process):
 class TRPO():
-    # def __init__(self, args, observation_space, action_space, task_q, result_q):
     def __init__(self, args, observation_space, action_space):
-        # multiprocessing.Process.__init__(self)
-        # self.exit = multiprocessing.Event()
-        # self.task_q = task_q
-        # self.result_q = result_q
         self.observation_space = observation_space
         self.action_space = action_space
         self.args = args
 
-    # def makeModel(self):      ## MAKE THIS PART OF __init__
+        # previously this was all part of makeModel(self) . . .
         self.observation_size = self.observation_space.shape[0]
         # self.observation_shape =  list(self.observation_space.shape)
         # print(self.observation_shape)
@@ -187,16 +178,13 @@ class TRPO():
         return stats["Average sum of rewards per episode"]
 
     def get_starting_weights(self):
-        # self.makeModel()
         return self.get_policy()
 
     def adjust_kl(self, kl_new):
-        # self.makeModel()
         self.args.max_kl = kl_new
         return
 
     def update(self, paths):
-        # self.makeModel()
         mean_reward = self.learn(paths)
         return self.get_policy(), mean_reward
 

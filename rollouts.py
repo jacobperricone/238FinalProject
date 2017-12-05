@@ -1,5 +1,3 @@
-from mpi4py import MPI
-
 import numpy as np
 import tensorflow as tf
 from utils import *
@@ -7,15 +5,12 @@ import gym
 import time
 import copy
 from random import randint
-# import multiprocessing
 
-# class Actor(multiprocessing.Process):
+import sys
+
+
 class Actor():
     def __init__(self, args, monitor, learner, learner_env):
-        # multiprocessing.Process.__init__(self)
-        # self.exit = multiprocessing.Event()
-        # self.task_q = task_q
-        # self.result_q = result_q
         self.args = args
         self.monitor = monitor
 
@@ -27,8 +22,8 @@ class Actor():
         self.learner = learner
         self.set_policy = SetPolicyWeights(self.learner.session, tf.trainable_variables())
 
-        # we will start by running (args.timesteps_per_batch / 1000) episodes for the first iteration
-        self.average_timesteps_in_episode = 1000
+        # # we will start by running (args.timesteps_per_batch / 1000) episodes for the first iteration
+        # self.average_timesteps_in_episode = 1000
 
     def set_policy_weights(self, parameters):
         self.set_policy(parameters)
@@ -60,23 +55,16 @@ class Actor():
                         "actions":  np.array(actions)}
                 return path
 
-    def rollout(self, num_rollouts):
-        # num_rollouts = int(self.args.timesteps_per_batch / self.average_timesteps_in_episode)
-
-        # paths = []
-        # i = 0
-        # while True:
-        #     for j in range(self.args.num_threads):
-        #         paths.append(self.episode())
-        #         i += 1
-        #         if i == num_rollouts:
-        #             break
-        #     if i == num_rollouts:
-        #         break
-
+    def rollout(self, num_timesteps):
         paths = []
-        for i in range(num_rollouts):
+        steps = 0
+        episode = 0
+        while steps < num_timesteps:
+            # print("Running an episode after completing {} timesteps".format(steps))
+            # sys.stdout.flush()
             paths.append(self.episode())
+            steps += len(paths[episode]["rewards"])
+            episode += 1
 
         self.average_timesteps_in_episode = sum([len(path["rewards"]) for path in paths]) / len(paths)
         return paths
