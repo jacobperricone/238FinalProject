@@ -9,6 +9,7 @@ import os
 import logging
 import random
 
+
 class TRPO():
     def __init__(self, args, observation_space, action_space):
         self.observation_space = observation_space
@@ -26,7 +27,7 @@ class TRPO():
         bias_init = tf.constant_initializer(0)
 
         config = tf.ConfigProto(
-            device_count = {'GPU': 0}
+            device_count={'GPU': 0}
         )
         self.session = tf.Session(config=config)
 
@@ -42,7 +43,8 @@ class TRPO():
             h2 = fully_connected(h1, self.hidden_size, self.hidden_size, weight_init, bias_init, "policy_h2")
             h2 = tf.nn.relu(h2)
             h3 = fully_connected(h2, self.hidden_size, self.action_size, weight_init, bias_init, "policy_h3")
-            action_dist_logstd_param = tf.Variable((.01*np.random.randn(1, self.action_size)).astype(np.float32), name="policy_logstd")
+            action_dist_logstd_param = tf.Variable((.01 * np.random.randn(1, self.action_size)).astype(np.float32),
+                                                   name="policy_logstd")
         # means for each action
         self.action_dist_mu = h3
         # log standard deviations for each actions
@@ -61,7 +63,8 @@ class TRPO():
         eps = 1e-8
         batch_size_float = tf.cast(batch_size, tf.float32)
         # kl divergence and shannon entropy
-        kl = gauss_KL(self.oldaction_dist_mu, self.oldaction_dist_logstd, self.action_dist_mu, self.action_dist_logstd) / batch_size_float
+        kl = gauss_KL(self.oldaction_dist_mu, self.oldaction_dist_logstd, self.action_dist_mu,
+                      self.action_dist_logstd) / batch_size_float
         ent = gauss_ent(self.action_dist_mu, self.action_dist_logstd) / batch_size_float
 
         self.losses = [surr, kl, ent]
@@ -94,7 +97,6 @@ class TRPO():
         # value function
         # self.vf = VF(self.session)
         self.vf = LinearVF()
-
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
     def learn(self, paths):
@@ -119,7 +121,8 @@ class TRPO():
         # train value function / baseline on rollout paths
         self.vf.fit(paths)
 
-        feed_dict = {self.obs: obs_n, self.action: action_n, self.advantage: advant_n, self.oldaction_dist_mu: action_dist_mu, self.oldaction_dist_logstd: action_dist_logstd}
+        feed_dict = {self.obs: obs_n, self.action: action_n, self.advantage: advant_n,
+                     self.oldaction_dist_mu: action_dist_mu, self.oldaction_dist_logstd: action_dist_logstd}
 
         # parameters
         thprev = self.gf()
@@ -155,12 +158,12 @@ class TRPO():
             return self.session.run(self.losses[0], feed_dict)
 
         # finds best parameter by starting with a big step and working backwards
-        theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir/ lm)
+        theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir / lm)
         # i guess we just take a fullstep no matter what
         theta = thprev + fullstep
         self.sff(theta)
 
-        surrogate_after, kl_after, entropy_after = self.session.run(self.losses,feed_dict)
+        surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
         episoderewards = np.array(
             [path["rewards"].sum() for path in paths])
@@ -174,7 +177,7 @@ class TRPO():
         stats["Surrogate loss"] = surrogate_after
         # print ("\n********** Iteration {} ************".format(i))
         for k, v in stats.items():
-            print("{} : {:e}".format(k,v))
+            print("{} : {:e}".format(k, v))
         return stats["Average sum of rewards per episode"]
 
     def get_starting_weights(self):
@@ -187,29 +190,3 @@ class TRPO():
     def update(self, paths):
         mean_reward = self.learn(paths)
         return self.get_policy(), mean_reward
-
-    # def run(self):
-    #     self.makeModel()
-    #     while True:
-    #         paths = self.task_q.get()
-    #         if paths is None:
-    #             # kill the learner
-    #             self.task_q.task_done()
-    #             break
-    #         elif paths == 1:
-    #             # just get params, no learn
-    #             self.task_q.task_done()
-    #             self.result_q.put(self.get_policy())
-    #         elif paths[0] == 2:
-    #             # adjusting the max KL.
-    #             self.args.max_kl = paths[1]
-    #             self.task_q.task_done()
-    #         else:
-    #             mean_reward = self.learn(paths)
-    #             self.task_q.task_done()
-    #             self.result_q.put((self.get_policy(), mean_reward))
-    #     return
-
-    # def shutdown(self):
-    #     print("shutdown initiated")
-    #     self.task_q.put(None)
