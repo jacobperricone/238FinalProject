@@ -162,8 +162,7 @@ class TRPO():
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses,feed_dict)
 
-        episoderewards = np.array(
-            [path["rewards"].sum() for path in paths])
+        episoderewards = np.array([path["rewards"].sum() for path in paths])
         stats = {}
         stats["Average sum of rewards per episode"] = episoderewards.mean()
         stats["Entropy"] = entropy_after

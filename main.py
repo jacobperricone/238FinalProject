@@ -47,12 +47,14 @@ if rank == 0:
 learner_env = gym.make(args.task)
 learner = TRPO(args, learner_env.observation_space, learner_env.action_space)
 if rank == 0:
-    starting_weights = learner.get_starting_weights()
+    # starting_weights = learner.get_starting_weights()
+    new_policy_weights = learner.get_starting_weights()
 else:
-    starting_weights = None
-starting_weights = comm.bcast(starting_weights, root=0)
+    # starting_weights = None
+    new_policy_weights = None
 actor = Actor(args, args.monitor, learner, learner_env)
-actor.set_policy_weights(starting_weights)
+# starting_weights = comm.bcast(starting_weights, root=0)
+# actor.set_policy_weights(starting_weights)
 
 start_time = time.time()
 history = {}
@@ -75,18 +77,23 @@ iteration = 0
 while True:
     iteration += 1
 
+    # synchronize model and update actor weights locally
+    bcast_start = time.time()
+    new_policy_weights = comm.bcast(new_policy_weights, root=0)
+    actor.set_policy_weights(new_policy_weights)
+    bcast_time = (time.time() - bcast_start)
+
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
     data = actor.rollout(args.timesteps_per_batch / size)
+    rollout_time = (time.time() - rollout_start)
 
     # synchronization of experience
-    data = comm.gather(data,root=0)
+    gather_start = time.time()
+    data = comm.gather(data, root=0)
     if rank == 0:
-        paths = []
-        for i in range(0,len(data)):
-            for j in range(0,len(data[i])):
-                paths.append(data[i][j])
-    rollout_time = (time.time() - rollout_start)
+        paths = [item for sublist in data for item in sublist]
+    gather_time = (time.time() - gather_start)
 
     # only master process does learning on TF graph
     if rank == 0:
@@ -96,10 +103,11 @@ while True:
         learn_time = (time.time() - learn_start)
 
         print(("-------- Iteration %d ----------" % iteration))
-        print(("Elapsed time = %.3f s" % (time.time() - start_time)))
+        print(("Iteration time = %.3f s (Elapsed time = %.3f s)" % (rollout_time + learn_time + gather_time + bcast_time, time.time() - start_time)))
         print(("    Rollout time = %.3f s" % rollout_time))
         print(("    Learn time = %.3f s" % learn_time))
-        print(("    Iteration time = %.3f s" % (rollout_time + learn_time)))
+        print(("    Gather time = %.3f s" % gather_time))
+        print(("    Broadcast time = %.3f s" % bcast_time))
 
         history["rollout_time"].append(rollout_time)
         history["learn_time"].append(learn_time)
@@ -162,10 +170,6 @@ while True:
         totalsteps += args.timesteps_per_batch
         if iteration >= args.n_iter or totalsteps >= args.n_steps:
             break
-
-    # synchronize new model and update actor weights locally
-    new_policy_weights = comm.bcast(new_policy_weights, root=0)
-    actor.set_policy_weights(new_policy_weights)
 
 if rank == 0:
     print("Evaluation complete!")
