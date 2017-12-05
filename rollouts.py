@@ -8,7 +8,6 @@ from random import randint
 
 import sys
 
-
 class Actor():
     def __init__(self, args, monitor, learner, learner_env):
         self.args = args
@@ -24,6 +23,8 @@ class Actor():
 
         # # we will start by running (args.timesteps_per_batch / 1000) episodes for the first iteration
         # self.average_timesteps_in_episode = 1000
+
+        self.ordering = {"obs":0, "action_dists_mu":1, "action_dists_logstd":2, "rewards":3, "actions":4,  "returns":5, "advantage":5}
 
     def set_policy_weights(self, parameters):
         self.set_policy(parameters)
@@ -48,11 +49,12 @@ class Actor():
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             if res[2] or i == self.args.max_pathlength - 2:
-                path = {"obs": np.concatenate(np.expand_dims(obs, 0)),
-                        "action_dists_mu": np.concatenate(action_dists_mu),
-                        "action_dists_logstd": np.concatenate(action_dists_logstd),
-                        "rewards": np.array(rewards),
-                        "actions":  np.array(actions)}
+                obs = np.expand_dims(obs, 0)
+                path = list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd]))
+                rewards = np.array(rewards)
+                returns = discount(rewards, self.args.gamma)
+                advantage = np.array(rewards) - self.learner.vf.predict(path[0],len(rewards))
+                path.extend([rewards, np.array(actions), returns, advantage])
                 return path
 
 
@@ -64,10 +66,8 @@ class Actor():
             # print("Running an episode after completing {} timesteps".format(steps))
             # sys.stdout.flush()
             paths.append(self.episode())
-            steps += len(paths[episode]["rewards"])
+            steps += len(paths[episode][self.ordering["rewards"]])
             episode += 1
 
-        self.average_timesteps_in_episode = sum([len(path["rewards"]) for path in paths]) / len(paths)
+        self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
         return paths
-
-
