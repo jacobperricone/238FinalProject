@@ -99,11 +99,14 @@ while True:
     if rank == 0:
         learn_start = time.time()
         learner.adjust_kl(args.max_kl)
-        new_policy_weights, mean_reward = learner.update(paths)
+        # new_policy_weights, mean_reward = learner.update(paths)
+        new_policy_weights, stats = learner.update(paths)
         learn_time = (time.time() - learn_start)
 
-        print(("-------- Iteration %d ----------" % iteration))
-        print(("Iteration time = %.3f s (Elapsed time = %.3f s)" % (rollout_time + learn_time + gather_time + bcast_time, time.time() - start_time)))
+        print(("\n-------- Iteration %d ----------" % iteration))
+        for k, v in stats.items():
+            print("{} : {:.3e}".format(k,v))
+        print(("Iteration time = %.3f s" % (rollout_time + learn_time + gather_time + bcast_time)))
         print(("    Rollout time = %.3f s" % rollout_time))
         print(("    Learn time = %.3f s" % learn_time))
         print(("    Gather time = %.3f s" % gather_time))
@@ -111,11 +114,11 @@ while True:
 
         history["rollout_time"].append(rollout_time)
         history["learn_time"].append(learn_time)
-        history["mean_reward"].append(mean_reward)
+        history["mean_reward"].append(stats["Average sum of rewards per episode"])
         history["timesteps"].append(args.timesteps_per_batch)
         history["maxkl"].append(args.max_kl)
 
-        recent_total_reward += mean_reward
+        recent_total_reward += stats["Average sum of rewards per episode"]
 
         if args.decay_method == "adaptive":
             if iteration % 10 == 0:
@@ -153,14 +156,15 @@ while True:
                 last_reward = recent_total_reward
                 recent_total_reward = 0
 
-        print(("Current steps is " + str(args.timesteps_per_batch) + " and KL is " + str(args.max_kl)))
+        # print(("Current step number is " + str(args.timesteps_per_batch) + " and KL is " + str(args.max_kl)))
 
         if iteration % 100 == 0:
             with open("%s-%s-%f-%f-%f-%f" % (args.task, args.decay_method, starting_timesteps, starting_kl, args.timestep_adapt, args.kl_adapt), "w") as outfile:
                 json.dump(history,outfile)
 
-        totalsteps += args.timesteps_per_batch
-        print(("%d total steps have happened" % totalsteps))
+        # totalsteps += args.timesteps_per_batch
+        totalsteps += stats["Timesteps"]
+        print(("%d total steps have happened (Elapsed time = %.3f s)" % (totalsteps,time.time() - start_time)))
         sys.stdout.flush()
 
         if iteration >= args.n_iter or totalsteps >= args.n_steps:

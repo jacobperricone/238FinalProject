@@ -164,17 +164,18 @@ class TRPO():
 
         episoderewards = np.array([path["rewards"].sum() for path in paths])
         stats = {}
+        # print ("\n********** Iteration {} ************".format(i))
         stats["Average sum of rewards per episode"] = episoderewards.mean()
         stats["Entropy"] = entropy_after
-        stats["max KL"] = self.args.max_kl
+        stats["Max KL"] = self.args.max_kl
         stats["Timesteps"] = sum([len(path["rewards"]) for path in paths])
         # stats["Time elapsed"] = "%.2f mins" % ((time.time() - start_time) / 60.0)
         stats["KL between old and new distribution"] = kl_after
         stats["Surrogate loss"] = surrogate_after
-        # print ("\n********** Iteration {} ************".format(i))
-        for k, v in stats.items():
-            print("{} : {:e}".format(k,v))
-        return stats["Average sum of rewards per episode"]
+        # for k, v in stats.items():
+        #     print("{} : {:e}".format(k,v))
+        # return stats["Average sum of rewards per episode"]
+        return stats
 
     def get_starting_weights(self):
         return self.get_policy()
@@ -184,8 +185,10 @@ class TRPO():
         return
 
     def update(self, paths):
-        mean_reward = self.learn(paths)
-        return self.get_policy(), mean_reward
+        # mean_reward = self.learn(paths)
+        # return self.get_policy(), mean_reward
+        stats = self.learn(paths)
+        return self.get_policy(), stats
 
     # def run(self):
     #     self.makeModel()
