@@ -14,8 +14,8 @@ comm = MPI.COMM_WORLD
 cpu = MPI.Get_processor_name()
 rank = comm.Get_rank()
 size = comm.Get_size()
-print("Hello world from processor {}, process {} out of {}".format(cpu,rank,size))
-sys.stdout.flush()
+# print("Hello world from processor {}, process {} out of {}".format(cpu,rank,size))
+# sys.stdout.flush()
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -60,6 +60,8 @@ start_time = time.time()
 history = {}
 history["rollout_time"] = []
 history["learn_time"] = []
+history["bcast_time"] = []
+history["gather_time"] = []
 history["mean_reward"] = []
 history["timesteps"] = []
 history["maxkl"] = []
@@ -99,21 +101,22 @@ while True:
     if rank == 0:
         learn_start = time.time()
         learner.adjust_kl(args.max_kl)
-        # new_policy_weights, mean_reward = learner.update(paths)
         new_policy_weights, stats = learner.update(paths)
         learn_time = (time.time() - learn_start)
 
         print(("\n-------- Iteration %d ----------" % iteration))
         for k, v in stats.items():
-            print("{} : {:.3e}".format(k,v))
+            print("{} = {:.3e}".format(k,v))
         print(("Iteration time = %.3f s" % (rollout_time + learn_time + gather_time + bcast_time)))
-        print(("    Rollout time = %.3f s" % rollout_time))
-        print(("    Learn time = %.3f s" % learn_time))
-        print(("    Gather time = %.3f s" % gather_time))
         print(("    Broadcast time = %.3f s" % bcast_time))
+        print(("    Rollout time = %.3f s" % rollout_time))
+        print(("    Gather time = %.3f s" % gather_time))
+        print(("    Learn time = %.3f s" % learn_time))
 
         history["rollout_time"].append(rollout_time)
         history["learn_time"].append(learn_time)
+        history["bcast_time"].append(bcast_time)
+        history["gather_time"].append(gather_time)
         history["mean_reward"].append(stats["Average sum of rewards per episode"])
         history["timesteps"].append(args.timesteps_per_batch)
         history["maxkl"].append(args.max_kl)

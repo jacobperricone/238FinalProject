@@ -31,9 +31,9 @@ class VF(object):
 
 
     def _features(self, path):
-        o = path["obs"].astype('float32')
+        o = path["obs"].astype("float32")
         o = o.reshape(o.shape[0], -1)
-        act = path["action_dists"].astype('float32')
+        act = path["action_dists"].astype("float32")
         l = len(path["rewards"])
         al = np.arange(l).reshape(-1, 1) / 10.0
         ret = np.concatenate([o, act, al, np.ones((l, 1))], axis=1)
@@ -58,20 +58,22 @@ class VF(object):
 class LinearVF(object):
     coeffs = None
 
-    def _features(self, path):
-        o = path["obs"].astype('float32')
+    def __init__(self, ordering):
+        self.ordering = ordering
+
+    def _features(self, obs, l):
+        o = obs.astype("float32")
         o = o.reshape(o.shape[0], -1)
-        l = len(path["rewards"])
+        # l = len(path["rewards"])
         al = np.arange(l).reshape(-1, 1) / 100.0
         return np.concatenate([o, o**2, al, al**2, np.ones((l, 1))], axis=1)
 
     def fit(self, paths):
-        featmat = np.concatenate([self._features(path) for path in paths])
-        returns = np.concatenate([path["returns"] for path in paths])
+        featmat = np.concatenate([self._features(path[self.ordering["obs"]], len(path[self.ordering["rewards"]])) for path in paths])
+        returns = np.concatenate([path[self.ordering["returns"]] for path in paths])
         n_col = featmat.shape[1]
         lamb = 2.0
         self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
 
-    def predict(self, path):
-        return np.zeros(len(path["rewards"])) if self.coeffs is None else self._features(
-            path).dot(self.coeffs)
+    def predict(self, obs, l):
+        return np.zeros(l) if self.coeffs is None else self._features(obs,l).dot(self.coeffs)

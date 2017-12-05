@@ -17,8 +17,6 @@ class TRPO():
 
         # previously this was all part of makeModel(self) . . .
         self.observation_size = self.observation_space.shape[0]
-        # self.observation_shape =  list(self.observation_space.shape)
-        # print(self.observation_shape)
         self.action_size = int(np.prod(self.action_space.shape))
         self.hidden_size = 64
 
@@ -93,26 +91,20 @@ class TRPO():
         self.session.run(tf.global_variables_initializer())
         # value function
         # self.vf = VF(self.session)
-        self.vf = LinearVF()
+        self.ordering = {"obs":0, "action_dists_mu":1, "action_dists_logstd":2, "rewards":3, "actions":4,  "returns":5, "advantage":5}
+        self.vf = LinearVF(self.ordering)
 
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
     def learn(self, paths):
-        # is it possible to replace A(s,a) with Q(s,a)?
-        for path in paths:
-            path["baseline"] = self.vf.predict(path)
-            path["returns"] = discount(path["rewards"], self.args.gamma)
-            path["advantage"] = path["returns"] - path["baseline"]
-            # path["advantage"] = path["returns"]
-
         # puts all the experiences in a matrix: total_timesteps x options
-        action_dist_mu = np.concatenate([path["action_dists_mu"] for path in paths])
-        action_dist_logstd = np.concatenate([path["action_dists_logstd"] for path in paths])
-        obs_n = np.concatenate([path["obs"] for path in paths])
-        action_n = np.concatenate([path["actions"] for path in paths])
+        action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])
+        action_dist_logstd = np.concatenate([path[self.ordering["action_dists_logstd"]] for path in paths])
+        obs_n = np.concatenate([path[self.ordering["obs"]] for path in paths])
+        action_n = np.concatenate([path[self.ordering["actions"]] for path in paths])
 
         # standardize to mean 0 stddev 1
-        advant_n = np.concatenate([path["advantage"] for path in paths])
+        advant_n = np.concatenate([path[self.ordering["advantage"]] for path in paths])
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
 
@@ -162,13 +154,15 @@ class TRPO():
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses,feed_dict)
 
-        episoderewards = np.array([path["rewards"].sum() for path in paths])
+        # episoderewards = np.array([path["rewards"].sum() for path in paths])
+        episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
         stats = {}
         # print ("\n********** Iteration {} ************".format(i))
         stats["Average sum of rewards per episode"] = episoderewards.mean()
         stats["Entropy"] = entropy_after
         stats["Max KL"] = self.args.max_kl
-        stats["Timesteps"] = sum([len(path["rewards"]) for path in paths])
+        # stats["Timesteps"] = sum([len(path["rewards"]) for path in paths])
+        stats["Timesteps"] = sum([len(path[self.ordering["rewards"]]) for path in paths])
         # stats["Time elapsed"] = "%.2f mins" % ((time.time() - start_time) / 60.0)
         stats["KL between old and new distribution"] = kl_after
         stats["Surrogate loss"] = surrogate_after
@@ -189,29 +183,3 @@ class TRPO():
         # return self.get_policy(), mean_reward
         stats = self.learn(paths)
         return self.get_policy(), stats
-
-    # def run(self):
-    #     self.makeModel()
-    #     while True:
-    #         paths = self.task_q.get()
-    #         if paths is None:
-    #             # kill the learner
-    #             self.task_q.task_done()
-    #             break
-    #         elif paths == 1:
-    #             # just get params, no learn
-    #             self.task_q.task_done()
-    #             self.result_q.put(self.get_policy())
-    #         elif paths[0] == 2:
-    #             # adjusting the max KL.
-    #             self.args.max_kl = paths[1]
-    #             self.task_q.task_done()
-    #         else:
-    #             mean_reward = self.learn(paths)
-    #             self.task_q.task_done()
-    #             self.result_q.put((self.get_policy(), mean_reward))
-    #     return
-
-    # def shutdown(self):
-    #     print("shutdown initiated")
-    #     self.task_q.put(None)
