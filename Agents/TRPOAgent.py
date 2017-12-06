@@ -125,6 +125,7 @@ class TRPO():
 
 
     def episode(self):
+
         obs, actions, rewards, action_dists_mu, action_dists_logstd = [], [], [], [], []
         ob = list(filter(self.env.reset()))
         for i in range(self.args.max_pathlength - 1):
@@ -147,6 +148,7 @@ class TRPO():
 
 
     def rollout(self, num_timesteps):
+        self.paths = []
         paths = []
         steps = 0
         episode = 0

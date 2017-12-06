@@ -23,8 +23,16 @@ class TRPO():
 
     def init_net(self):
         # previously this was all part of makeModel(self) . . .
-        self.observation_size = self.observation_space.shape[0]
+        self.observation_shape = self.observation_space.shape
+        self.observation_size = self.observation_shape[0]
         self.action_size = int(np.prod(self.action_space.shape))
+        keys = ['action_dists_mu', 'action_dists_logstd', 'rewards,actions', 'returns', 'advantage']
+        self.col_orderings = {'obs': list(range(self.observation_size))}
+        self.col_orderings = dict(self.col_orderings, **{keys[i]: self.observation_size + (i+1) for i in range(len(keys))})
+        self.paths = []
+        print(self.col_orderings)
+
+
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
@@ -123,12 +131,15 @@ class TRPO():
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             if res[2] or i == self.args.max_pathlength - 2:
-                obs = np.expand_dims(obs, 0)
-                path = list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd]))
-                rewards = np.array(rewards)
+                obs = np.concatenate(np.expand_dims(obs, 0))
+                action_dists_mu = np.concatenate(action_dists_mu)
+                action_dists_logstd = np.concatenate(action_dists_logstd)
+                actions = np.array(actions)
+                rewards =  np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
-                advantage = np.array(rewards) - self.vf.predict(path[0], len(rewards))
-                path.extend([rewards, np.array(actions), returns, advantage])
+                rewards, returns = map(lambda x: np.expand_dims(x,-1), [rewards, returns])
+                advantage = np.expand_dims(rewards.ravel() - self.vf.predict(obs, len(rewards)),-1)
+                path = np.hstack((obs, action_dists_mu, action_dists_logstd, rewards,actions, returns, advantage))
                 return path
 
     def rollout(self, num_timesteps):
@@ -143,7 +154,16 @@ class TRPO():
             episode += 1
 
         self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
+        self.paths = np.concatenate(paths,0)
+        print("PATHS IS OF SIZE {}".format(self.paths.shape))
         return paths
+
+    def find_timesteps(self):
+        if len(self.paths):
+            return self.paths.shape[0]
+        else:
+            return None
+
 
     def learn(self, paths):
         action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])

@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser(description='TRPO.')
 
 # these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
-parser.add_argument("--timesteps_per_batch", type=int, default=40000)
+parser.add_argument("--timesteps_per_batch", type=int, default=400)
 parser.add_argument("--n_steps", type=int, default=10000000)
 parser.add_argument("--n_iter", type=int, default=100)
 parser.add_argument("--gamma", type=float, default=.995)
@@ -44,6 +44,7 @@ if rank == 0:
 
 # initialize TRPO learner on all processes, distribute the starting weights
 learner_env = gym.make(args.task)
+observation_size = int(learner_env.observation_space.shape[0])
 learner = TRPO(args, learner_env)
 if rank == 0:
     # starting_weights = learner.get_starting_weights()
@@ -86,18 +87,25 @@ while True:
     rollout_start = time.time()
 
     data = learner.rollout(args.timesteps_per_batch / size)
-
     rollout_time = (time.time() - rollout_start)
+
+    collect_time_start = time.time()
+    num_steps = learner.find_timesteps()
+    total_steps =comm.reduce(num_steps, root=0)
+    collect_time_end = time.time() - collect_time_start
+
 
     # synchronization of experience
     gather_start = time.time()
-    data = comm.gather(data, root=0)
-
+    agg_data = None
     paths = []
     if rank == 0:
-        paths = [item for sublist in data for item in sublist]
+        agg_data = np.zeros((int(total_steps), observation_size + 6))
+    comm.Gather(data, agg_data, root=0)
+
     gather_time = (time.time() - gather_start)
 
+    print(data.shape)
     # only master process does learning on TF graph
     if rank == 0:
         learn_start = time.time()
