@@ -123,7 +123,7 @@ while True:
         print(("\n-------- Iteration %d ----------" % iteration))
         print(("Reward Statistics:"))
         for k, v in stats.items():
-            print("\t{} = {:.3e}".format(k,v))
+            print("\t{} = {:2.5f}".format(k,v))
         print(("\nTiming Statistics:"))
         print(("\tIteration time = %.3f s" % (rollout_time + learn_time + gather_time + bcast_time)))
         print(("\tBroadcast time = %.3f s" % bcast_time))
