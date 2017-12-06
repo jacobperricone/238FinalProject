@@ -29,7 +29,6 @@ class VF(object):
         self.train = tf.train.AdamOptimizer().minimize(l2)
         self.session.run(tf.global_variables_initializer())
 
-
     def _features(self, path):
         o = path["obs"].astype("float32")
         o = o.reshape(o.shape[0], -1)
@@ -54,7 +53,6 @@ class VF(object):
             ret = self.session.run(self.net, {self.x: self._features(path)})
             return np.reshape(ret, (ret.shape[0], ))
 
-
 class LinearVF(object):
     coeffs = None
 
@@ -68,13 +66,23 @@ class LinearVF(object):
         al = np.arange(l).reshape(-1, 1) / 100.0
         return np.concatenate([o, o**2, al, al**2, np.ones((l, 1))], axis=1)
 
-    def fit(self, paths):
-        featmat = np.concatenate([self._features(path[self.ordering["obs"]], len(path[self.ordering["rewards"]])) for path in paths])
-        returns = np.concatenate([path[self.ordering["returns"]] for path in paths])
+    def fit(self, paths):   ### IS IT A PROBLEM TO COLLECT FEATURES ON FULL DATA SET??
+        featmat = self._features(paths[:,self.ordering["obs"]:self.ordering["obs"]+paths.shape[1]-len(self.ordering)+1], paths.shape[0])
+        returns = paths[:,self.ordering["returns"]+paths.shape[1]-len(self.ordering)]
+
+        # print("featmat.shape = {}".format(featmat.shape))
+        # print("returns.shape = {}".format(returns.shape))
+
         n_col = featmat.shape[1]
         lamb = 2.0
         self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
 
+    # def fit(self, paths):
+    #     featmat = np.concatenate([self._features(path[self.ordering["obs"]], len(path[self.ordering["rewards"]])) for path in paths])
+    #     returns = np.concatenate([path[self.ordering["returns"]] for path in paths])
+    #     n_col = featmat.shape[1]
+    #     lamb = 2.0
+    #     self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
+
     def predict(self, obs, l):
         return np.zeros(l) if self.coeffs is None else self._features(obs,l).dot(self.coeffs)
-

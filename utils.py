@@ -123,7 +123,6 @@ def linesearch(f, x, fullstep, expected_improve_rate):
     return x
 
 class SetFromFlat(object):
-
     def __init__(self, session, var_list):
         self.session = session
         assigns = []
@@ -142,7 +141,6 @@ class SetFromFlat(object):
         self.session.run(self.op, feed_dict={self.theta: theta})
 
 class GetFlat(object):
-
     def __init__(self, session, var_list):
         self.session = session
         self.op = tf.concat([tf.reshape(v, [numel(v)]) for v in var_list],0)

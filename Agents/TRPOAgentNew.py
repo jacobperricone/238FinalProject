@@ -9,7 +9,6 @@ import os
 import logging
 import random
 
-
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
@@ -17,7 +16,7 @@ class TRPO():
         self.env = env
         self.args = args
         self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
-                         "returns": 5, "advantage": 5}
+                         "returns": 5, "advantage": 6}
         self.init_net()
         self.init_work()
 
@@ -68,7 +67,6 @@ class TRPO():
         self.sff = SetFromFlat(self.session, var_list)
         self.session.run(tf.global_variables_initializer())
         # value function
-
         self.vf = LinearVF(self.ordering)
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
@@ -89,13 +87,11 @@ class TRPO():
         kl = gauss_KL(self.net.oldaction_dist_mu, self.net.oldaction_dist_logstd, self.net.action_dist_mu,
                       self.net.action_dist_logstd) / batch_size_float
         ent = gauss_ent(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
-
         return kl, ent
 
     def init_work(self):
         if self.args.monitor:
             self.env.monitor.start('monitor/', force=True)
-
         self.set_policy = SetPolicyWeights(self.session, self.net.var_list)
         self.average_timesteps_in_episode = 1000
 
@@ -106,7 +102,6 @@ class TRPO():
         obs = np.expand_dims(obs, 0)
         action_dist_mu, action_dist_logstd = self.session.run([self.net.action_dist_mu, self.net.action_dist_logstd],
                                                               feed_dict={self.net.obs: obs})
-
         act = action_dist_mu + np.exp(action_dist_logstd) * np.random.randn(*action_dist_logstd.shape)
         return act.ravel(), action_dist_mu, action_dist_logstd
 
@@ -123,36 +118,67 @@ class TRPO():
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             if res[2] or i == self.args.max_pathlength - 2:
+                # obs = np.expand_dims(obs, 0)
+                # path = list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd]))
+                # rewards = np.array(rewards)
+                # returns = discount(rewards, self.args.gamma)
+                # advantage = np.array(rewards) - self.vf.predict(path[0],len(rewards))
+                # path.extend([rewards, np.array(actions), returns, advantage])
+
                 obs = np.expand_dims(obs, 0)
-                path = list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd]))
+                path = np.concatenate(list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd])), axis=1)
                 rewards = np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
-                advantage = np.array(rewards) - self.vf.predict(path[0], len(rewards))
-                path.extend([rewards, np.array(actions), returns, advantage])
+                advantage = np.array(rewards) - self.vf.predict(path[:,:len(ob)],len(rewards))
+                rewards = np.expand_dims(rewards, 1)
+                returns = np.expand_dims(returns, 1)
+                advantage = np.expand_dims(advantage, 1)
+                path = np.concatenate([path,rewards,np.array(actions),returns,advantage], axis=1)
+                # print("path.shape = {}".format(path.shape))
                 return path
 
     def rollout(self, num_timesteps):
-        paths = []
-        steps = 0
-        episode = 0
+        # paths = []
+        paths = self.episode()
+        steps = paths.shape[0]
         while steps < num_timesteps:
             # print("Running an episode after completing {} timesteps".format(steps))
             # sys.stdout.flush()
-            paths.append(self.episode())
-            steps += len(paths[episode][self.ordering["rewards"]])
-            episode += 1
+            # paths.append(self.episode())
+            paths = np.concatenate([paths,self.episode()], axis = 0)
+            steps = paths.shape[0]
+            # print("steps = {}".format(steps))
 
-        self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
+        # self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
         return paths
 
     def learn(self, paths):
-        action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])
-        action_dist_logstd = np.concatenate([path[self.ordering["action_dists_logstd"]] for path in paths])
-        obs_n = np.concatenate([path[self.ordering["obs"]] for path in paths])
-        action_n = np.concatenate([path[self.ordering["actions"]] for path in paths])
+        # action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])
+        # action_dist_logstd = np.concatenate([path[self.ordering["action_dists_logstd"]] for path in paths])
+        # obs_n = np.concatenate([path[self.ordering["obs"]] for path in paths])
+        # action_n = np.concatenate([path[self.ordering["actions"]] for path in paths])
+        obs_n = paths[:,self.ordering["obs"]:self.ordering["obs"]+paths.shape[1]-len(self.ordering)+1]
+        action_dist_mu = paths[:,self.ordering["action_dists_mu"]+paths.shape[1]-len(self.ordering)]
+        action_dist_logstd = paths[:,self.ordering["action_dists_logstd"]+paths.shape[1]-len(self.ordering)]
+        action_n = paths[:,self.ordering["actions"]+paths.shape[1]-len(self.ordering)]
+
+        # obs_n = np.expand_dims(obs_n, 1)
+        action_dist_mu = np.expand_dims(action_dist_mu, 1)
+        action_dist_logstd = np.expand_dims(action_dist_logstd, 1)
+        action_n = np.expand_dims(action_n, 1)
+
+        # print("obs_n.shape = {}".format(obs_n.shape))
+        # print("action_dist_mu.shape = {}".format(action_dist_mu.shape))
+        # print("action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
+        # print("action_n.shape = {}".format(action_n.shape))
 
         # standardize to mean 0 stddev 1
-        advant_n = np.concatenate([path[self.ordering["advantage"]] for path in paths])
+        # advant_n = np.concatenate([path[self.ordering["advantage"]] for path in paths])
+        advant_n = paths[:,self.ordering["advantage"]+paths.shape[1]-len(self.ordering)]
+
+        # # advant_n = np.expand_dims(advant_n, 1)
+        # print("advant_n.shape = {}".format(advant_n.shape))
+
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
 
@@ -207,15 +233,17 @@ class TRPO():
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
         # episoderewards = np.array([path["rewards"].sum() for path in paths])
-        episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
+        # episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
+        episoderewards = np.sum(paths[:,self.ordering["rewards"]+paths.shape[1]-len(self.ordering)])  ## MUST FIX THIS FOR PER EPISODE!
         stats = {}
         stats["Average sum of rewards per episode"] = episoderewards.mean()
         stats["Entropy"] = entropy_after
         stats["Max KL"] = self.args.max_kl
-        stats["Timesteps"] = sum([len(path[self.ordering["rewards"]]) for path in paths])
+        # stats["Timesteps"] = sum([len(path[self.ordering["rewards"]]) for path in paths])
+        stats["Timesteps"] = paths.shape[0]
         stats["KL between old and new distribution"] = kl_after
         stats["Surrogate loss"] = surrogate_after
-        return stats
+        return self.get_policy(), stats
 
     def get_starting_weights(self):
         return self.get_policy()
@@ -223,7 +251,3 @@ class TRPO():
     def adjust_kl(self, kl_new):
         self.args.max_kl = kl_new
         return
-
-    def update(self, paths):
-        mean_reward = self.learn(paths)
-        return self.get_policy(), mean_reward
