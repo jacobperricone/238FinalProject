@@ -100,12 +100,13 @@ while True:
     agg_data = None
     paths = []
     if rank == 0:
-        agg_data = np.zeros((int(total_steps), observation_size + 6))
-    comm.Gather(data, agg_data, root=0)
+        agg_data = np.empty((int(total_steps), observation_size + 6))
+        print(agg_data.shape)
+        comm.Gather(data, agg_data, root=0)
 
     gather_time = (time.time() - gather_start)
 
-    print(data.shape)
+
     # only master process does learning on TF graph
     if rank == 0:
         learn_start = time.time()
