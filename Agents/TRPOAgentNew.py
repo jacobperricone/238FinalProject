@@ -134,11 +134,10 @@ class TRPO():
                 rewards =  np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
                 rewards, returns = map(lambda x: np.expand_dims(x,-1), [rewards, returns])
-                advantage = np.expand_dims(rewards.ravel() - self.vf.predict(obs),-1)
                 range_array =  np.arange(obs.shape[0]).reshape(-1, 1) / 100.0
                 ones_array = np.ones((obs.shape[0], 1))
                 features = np.concatenate([obs, obs**2, range_array, range_array**2, ones_array], axis=1)
-
+                advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
                 logging.debug("In Episode: obs shape {}".format(obs.shape))
                 logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
                 logging.debug("In Episode: action_dists_logstd {}".format(action_dists_logstd.shape))

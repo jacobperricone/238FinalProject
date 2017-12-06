@@ -76,5 +76,5 @@ class LinearVF(object):
         self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
 
 
-    def predict(self, obs):
-        return np.zeros(obs.shape[0]) if self.coeffs is None else self.features(obs).dot(self.coeffs).ravel()
+    def predict(self, features):
+        return np.zeros(features.shape[0]) if self.coeffs is None else features.dot(self.coeffs).ravel()
