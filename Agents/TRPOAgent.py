@@ -8,7 +8,6 @@ import os
 import logging
 import random
 
-
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
@@ -16,7 +15,7 @@ class TRPO():
         self.env = env
         self.args = args
         self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
-                         "returns": 5, "advantage": 5}
+                         "returns": 5, "advantage": 6}
         self.init_net()
         self.init_work()
 
@@ -143,8 +142,15 @@ class TRPO():
                 returns = discount(rewards, self.args.gamma)
                 advantage = np.array(rewards) - self.vf.predict(path[0],len(rewards))
                 path.extend([rewards, np.array(actions), returns, advantage])
+                # print("obs.shape = {}".format(np.concatenate(obs).shape))
+                # print("action_dists_mu.shape = {}".format(np.concatenate(action_dists_mu).shape))
+                # print("action_dists_logstd.shape = {}".format(np.concatenate(action_dists_logstd).shape))
+                # print("actions.shape = {}".format(np.array(actions).shape))
+                # print("rewards.shape = {}".format(rewards.shape))
+                # print("returns.shape = {}".format(returns.shape))
+                # print("advantage.shape = {}".format(advantage.shape))
+                # print("len(path) = {}".format(len(path)))
                 return path
-
 
     def rollout(self, num_timesteps):
         paths = []
@@ -159,8 +165,6 @@ class TRPO():
 
         self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
         return paths
-
-
 
     def learn(self, paths):
         # puts all the experiences in a matrix: total_timesteps x options
@@ -230,7 +234,7 @@ class TRPO():
         stats["Timesteps"] = sum([len(path[self.ordering["rewards"]]) for path in paths])
         stats["KL between old and new distribution"] = kl_after
         stats["Surrogate loss"] = surrogate_after
-        return stats
+        return self.get_policy(), stats
 
     def get_starting_weights(self):
         return self.get_policy()
@@ -238,7 +242,3 @@ class TRPO():
     def adjust_kl(self, kl_new):
         self.args.max_kl = kl_new
         return
-
-    def update(self, paths):
-        stats = self.learn(paths)
-        return self.get_policy(), stats

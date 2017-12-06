@@ -2,10 +2,6 @@ from utils import *
 import numpy as np
 import tensorflow as tf
 
-
-
-
-
 class NetworkContinous(object):
     def __init__(self, scope, obs_size, act_size):
         self.observation_size = obs_size
@@ -34,5 +30,3 @@ class NetworkContinous(object):
             self.action_dist_logstd = tf.tile(self.action_dist_logstd_param, tf.stack((tf.shape(self.action_dist_mu)[0], 1)))
 
             self.var_list = [v for v in tf.trainable_variables() if v.name.startswith(scope)]
-
-
