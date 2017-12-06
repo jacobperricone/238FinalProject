@@ -31,6 +31,7 @@ class TRPO():
         keys = ['action_dists_mu', 'action_dists_logstd', 'rewards','actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
         self.col_orderings = dict(self.col_orderings, **{keys[i]: [self.observation_size + i] for i in range(len(keys))})
+        self.col_orderings['features'] = list(range(self.observation_size*2 + 3))
         self.paths = []
         config = tf.ConfigProto(
             device_count={'GPU': 0}
@@ -126,7 +127,7 @@ class TRPO():
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             if res[2] or i == self.args.max_pathlength - 2:
-                obs = np.concatenate(np.expand_dims(obs, 0))
+                obs = np.concatenate(np.expand_dims(obs, 0)).astype("float32")
                 action_dists_mu = np.concatenate(action_dists_mu)
                 action_dists_logstd = np.concatenate(action_dists_logstd)
                 actions = np.array(actions)
@@ -134,7 +135,9 @@ class TRPO():
                 returns = discount(rewards, self.args.gamma)
                 rewards, returns = map(lambda x: np.expand_dims(x,-1), [rewards, returns])
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(obs),-1)
-
+                range_array =  np.arange(obs.shape[0]).reshape(-1, 1) / 100.0
+                ones_array = np.ones((obs.shape[0], 1))
+                features = np.concatenate([obs, obs**2, range_array, range_array**2, ones_array], axis=1)
 
                 logging.debug("In Episode: obs shape {}".format(obs.shape))
                 logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
@@ -143,7 +146,7 @@ class TRPO():
                 logging.debug("In Episode: rewards {}".format(rewards.shape))
                 logging.debug("In Episode: advantage {}".format(advantage.shape))
 
-                path = np.hstack((obs, action_dists_mu, action_dists_logstd, rewards,actions, returns, advantage))
+                path = np.hstack((features, action_dists_mu, action_dists_logstd, rewards,actions, returns, advantage))
                 return path
 
     def rollout(self, num_timesteps):
@@ -168,7 +171,7 @@ class TRPO():
         action_n = paths[:,self.col_orderings['actions']]
         rewards = paths[:, self.col_orderings['rewards']]
         advant_n = paths[:,self.col_orderings['advantage']].ravel()
-
+        features = paths[:, self.col_orderings['features']]
         logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
         logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
         logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
@@ -180,7 +183,7 @@ class TRPO():
         advant_n /= (advant_n.std() + 1e-8)
 
         # train value function / baseline on rollout paths
-        self.vf.fit(obs_n, rewards)
+        self.vf.fit(features, rewards)
 
         feed_dict = {self.net.obs: obs_n,
                      self.net.action: action_n,
@@ -231,7 +234,7 @@ class TRPO():
 
         # episoderewards = np.array([path["rewards"].sum() for path in paths])
         # episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
-        episoderewards = np.sum(paths[:,self.ordering["rewards"]+paths.shape[1]-len(self.ordering)])  ## MUST FIX THIS FOR PER EPISODE!
+        episoderewards = np.sum(paths[:,self.col_orderings['rewards']])  ## MUST FIX THIS FOR PER EPISODE!
         stats = {}
         stats["Avg_Reward"] = episoderewards.mean()
         stats["Entropy"] = entropy_after
