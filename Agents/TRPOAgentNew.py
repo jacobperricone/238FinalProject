@@ -29,8 +29,10 @@ class TRPO():
         self.action_size = int(np.prod(self.action_space.shape))
         keys = ['action_dists_mu', 'action_dists_logstd', 'rewards','actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
-        self.col_orderings = dict(self.col_orderings, **{keys[i]: [self.observation_size + i] for i in range(len(keys))})
         self.col_orderings['features'] = list(range(self.observation_size*2 + 3))
+        self.col_orderings = dict(self.col_orderings,
+                                  **{keys[i]: [2*self.observation_size + 3 + i] for i in range(len(keys))})
+        print(self.col_orderings)
         self.paths = []
         config = tf.ConfigProto(
             device_count={'GPU': 0}
@@ -127,7 +129,7 @@ class TRPO():
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             if res[2] or i == self.args.max_pathlength - 2:
-                obs = np.concatenate(np.expand_dims(obs, 0)).astype("float32")
+                obs = np.concatenate(np.expand_dims(obs, 0))
                 action_dists_mu = np.concatenate(action_dists_mu)
                 action_dists_logstd = np.concatenate(action_dists_logstd)
                 actions = np.array(actions)
@@ -140,6 +142,7 @@ class TRPO():
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
 
                 logging.debug("In Episode: obs shape {}".format(obs.shape))
+                logging.debug("In Episode: feat shape {}".format(features.shape))
                 logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
                 logging.debug("In Episode: action_dists_logstd {}".format(action_dists_logstd.shape))
                 logging.debug("In Episode: actions {}".format(actions.shape))
