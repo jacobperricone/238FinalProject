@@ -4,6 +4,7 @@
     <list default="true" id="a2d1a6aa-7b2e-4b1f-b1fc-8a78a1d0f277" name="Default" comment="">
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/Agents/TRPOAgentNew.py" afterPath="$PROJECT_DIR$/Agents/TRPOAgentNew.py" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/Networks/Baselines.py" afterPath="$PROJECT_DIR$/Networks/Baselines.py" />
+      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/main.py" afterPath="$PROJECT_DIR$/main.py" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="TRACKING_ENABLED" value="true" />
@@ -31,8 +32,8 @@
           <file leaf-file-name="TRPOAgentNew.py" pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/Agents/TRPOAgentNew.py">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="488">
-                  <caret line="154" column="36" lean-forward="true" selection-start-line="154" selection-start-column="36" selection-end-line="154" selection-end-column="36" />
+                <state relative-caret-position="360">
+                  <caret line="30" column="0" lean-forward="false" selection-start-line="30" selection-start-column="0" selection-end-line="34" selection-end-column="107" />
                   <folding>
                     <element signature="e#0#18#0" expanded="true" />
                   </folding>
@@ -43,11 +44,11 @@
           <file leaf-file-name="main.py" pinned="false" current-in-tab="false">
             <entry file="file://$PROJECT_DIR$/main.py">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="709">
-                  <caret line="194" column="52" lean-forward="false" selection-start-line="194" selection-start-column="52" selection-end-line="194" selection-end-column="52" />
+                <state relative-caret-position="-365">
+                  <caret line="36" column="29" lean-forward="true" selection-start-line="36" selection-start-column="29" selection-end-line="36" selection-end-column="29" />
                   <folding>
                     <element signature="e#0#18#0" expanded="true" />
-                    <marker date="1512542219000" expanded="true" signature="6962:7222" ph="..." />
+                    <marker date="1512581772000" expanded="true" signature="6960:7220" ph="..." />
                   </folding>
                 </state>
               </provider>
@@ -72,8 +73,8 @@
           <file leaf-file-name="Baselines.py" pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/Networks/Baselines.py">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="673">
-                  <caret line="62" column="30" lean-forward="true" selection-start-line="62" selection-start-column="30" selection-end-line="62" selection-end-column="30" />
+                <state relative-caret-position="688">
+                  <caret line="62" column="0" lean-forward="false" selection-start-line="62" selection-start-column="0" selection-end-line="67" selection-end-column="0" />
                   <folding>
                     <element signature="e#0#22#0" expanded="true" />
                   </folding>
@@ -106,7 +107,6 @@
   </component>
   <component name="FindInProjectRecents">
     <findStrings>
-      <find>oldaction</find>
       <find>self.observation</find>
       <find>sess</find>
       <find>SetP</find>
@@ -134,8 +134,9 @@
       <find>assigne</find>
       <find>pr</find>
       <find>fit</find>
-      <find>self.</find>
       <find>predict</find>
+      <find>returns</find>
+      <find>self.</find>
     </findStrings>
   </component>
   <component name="Git.Settings">
@@ -150,9 +151,9 @@
         <option value="$PROJECT_DIR$/rollouts.py" />
         <option value="$PROJECT_DIR$/Agents/TRPOAgent.py" />
         <option value="$PROJECT_DIR$/utils.py" />
+        <option value="$PROJECT_DIR$/Networks/Baselines.py" />
         <option value="$PROJECT_DIR$/main.py" />
         <option value="$PROJECT_DIR$/Agents/TRPOAgentNew.py" />
-        <option value="$PROJECT_DIR$/Networks/Baselines.py" />
       </list>
     </option>
   </component>
@@ -341,7 +342,7 @@
           <caret line="69" column="54" lean-forward="false" selection-start-line="69" selection-start-column="43" selection-end-line="69" selection-end-column="54" />
           <folding>
             <element signature="e#0#18#0" expanded="true" />
-            <marker date="1512542219000" expanded="true" signature="6962:7222" ph="..." />
+            <marker date="1512581772000" expanded="true" signature="6960:7220" ph="..." />
           </folding>
         </state>
       </provider>
@@ -431,7 +432,7 @@
           <caret line="11" column="21" lean-forward="true" selection-start-line="11" selection-start-column="21" selection-end-line="11" selection-end-column="21" />
           <folding>
             <element signature="e#0#18#0" expanded="true" />
-            <marker date="1512542219000" expanded="true" signature="6962:7222" ph="..." />
+            <marker date="1512581772000" expanded="true" signature="6960:7220" ph="..." />
           </folding>
         </state>
       </provider>
@@ -452,7 +453,7 @@
           <caret line="62" column="0" lean-forward="true" selection-start-line="62" selection-start-column="0" selection-end-line="62" selection-end-column="0" />
           <folding>
             <element signature="e#0#18#0" expanded="true" />
-            <marker date="1512542219000" expanded="true" signature="6962:7222" ph="..." />
+            <marker date="1512581772000" expanded="true" signature="6960:7220" ph="..." />
           </folding>
         </state>
       </provider>
@@ -511,7 +512,7 @@
           <caret line="69" column="54" lean-forward="false" selection-start-line="69" selection-start-column="43" selection-end-line="69" selection-end-column="54" />
           <folding>
             <element signature="e#0#18#0" expanded="true" />
-            <marker date="1512542219000" expanded="true" signature="6962:7222" ph="..." />
+            <marker date="1512581772000" expanded="true" signature="6960:7220" ph="..." />
           </folding>
         </state>
       </provider>
@@ -578,31 +579,31 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/main.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="709">
-          <caret line="194" column="52" lean-forward="false" selection-start-line="194" selection-start-column="52" selection-end-line="194" selection-end-column="52" />
+        <state relative-caret-position="-365">
+          <caret line="36" column="29" lean-forward="true" selection-start-line="36" selection-start-column="29" selection-end-line="36" selection-end-column="29" />
           <folding>
             <element signature="e#0#18#0" expanded="true" />
-            <marker date="1512542219000" expanded="true" signature="6962:7222" ph="..." />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/Agents/TRPOAgentNew.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="488">
-          <caret line="154" column="36" lean-forward="true" selection-start-line="154" selection-start-column="36" selection-end-line="154" selection-end-column="36" />
-          <folding>
-            <element signature="e#0#18#0" expanded="true" />
+            <marker date="1512581772000" expanded="true" signature="6960:7220" ph="..." />
           </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/Networks/Baselines.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="673">
-          <caret line="62" column="30" lean-forward="true" selection-start-line="62" selection-start-column="30" selection-end-line="62" selection-end-column="30" />
+        <state relative-caret-position="688">
+          <caret line="62" column="0" lean-forward="false" selection-start-line="62" selection-start-column="0" selection-end-line="67" selection-end-column="0" />
           <folding>
             <element signature="e#0#22#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/Agents/TRPOAgentNew.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="360">
+          <caret line="30" column="0" lean-forward="false" selection-start-line="30" selection-start-column="0" selection-end-line="34" selection-end-column="107" />
+          <folding>
+            <element signature="e#0#18#0" expanded="true" />
           </folding>
         </state>
       </provider>

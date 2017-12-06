@@ -67,9 +67,7 @@ class LinearVF(object):
     #     return np.concatenate([o, o**2, al, al**2, np.ones((o.shape[0], 1))], axis=1)
 
     def fit(self, featmat, returns):   ### IS IT A PROBLEM TO COLLECT FEATURES ON FULL DATA SET??
-        start  = time.time()
-
-        print("This took {} sec".format(time.time() - start))
+        featmat = featmat.astype("float32")
         returns = returns
         n_col = featmat.shape[1]
         lamb = 2.0
