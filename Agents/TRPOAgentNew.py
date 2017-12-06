@@ -162,22 +162,22 @@ class TRPO():
         action_dist_logstd = paths[:,self.ordering["action_dists_logstd"]+paths.shape[1]-len(self.ordering)]
         action_n = paths[:,self.ordering["actions"]+paths.shape[1]-len(self.ordering)]
 
-        # print("obs_n.shape = {}".format(obs_n.shape))
-        # print("action_dist_mu.shape = {}".format(action_dist_mu.shape))
-        # print("action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
-        # print("action_n.shape = {}".format(action_n.shape))
-
         # obs_n = np.expand_dims(obs_n, 1)
         action_dist_mu = np.expand_dims(action_dist_mu, 1)
         action_dist_logstd = np.expand_dims(action_dist_logstd, 1)
         action_n = np.expand_dims(action_n, 1)
 
+        # print("obs_n.shape = {}".format(obs_n.shape))
+        # print("action_dist_mu.shape = {}".format(action_dist_mu.shape))
+        # print("action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
+        # print("action_n.shape = {}".format(action_n.shape))
+
         # standardize to mean 0 stddev 1
         # advant_n = np.concatenate([path[self.ordering["advantage"]] for path in paths])
         advant_n = paths[:,self.ordering["advantage"]+paths.shape[1]-len(self.ordering)]
 
+        # # advant_n = np.expand_dims(advant_n, 1)
         # print("advant_n.shape = {}".format(advant_n.shape))
-        advant_n = np.expand_dims(advant_n, 1)
 
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
@@ -234,7 +234,7 @@ class TRPO():
 
         # episoderewards = np.array([path["rewards"].sum() for path in paths])
         # episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
-        episoderewards = np.sum(paths[:,self.ordering["rewards"]+paths.shape[1]-len(self.ordering)])
+        episoderewards = np.sum(paths[:,self.ordering["rewards"]+paths.shape[1]-len(self.ordering)])  ## MUST FIX THIS FOR PER EPISODE!
         stats = {}
         stats["Average sum of rewards per episode"] = episoderewards.mean()
         stats["Entropy"] = entropy_after

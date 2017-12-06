@@ -69,6 +69,10 @@ class LinearVF(object):
     def fit(self, paths):   ### IS IT A PROBLEM TO COLLECT FEATURES ON FULL DATA SET??
         featmat = self._features(paths[:,self.ordering["obs"]:self.ordering["obs"]+paths.shape[1]-len(self.ordering)+1], paths.shape[0])
         returns = paths[:,self.ordering["returns"]+paths.shape[1]-len(self.ordering)]
+
+        # print("featmat.shape = {}".format(featmat.shape))
+        # print("returns.shape = {}".format(returns.shape))
+
         n_col = featmat.shape[1]
         lamb = 2.0
         self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
