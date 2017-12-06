@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser(description='TRPO.')
 
 # these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
-parser.add_argument("--timesteps_per_batch", type=int, default=400)
+parser.add_argument("--timesteps_per_batch", type=int, default=40000)
 parser.add_argument("--n_steps", type=int, default=10000000)
 parser.add_argument("--n_iter", type=int, default=100)
 parser.add_argument("--gamma", type=float, default=.995)
@@ -86,29 +86,28 @@ while isDone == 0:
 
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
-    data = learner.rollout(args.timesteps_per_batch / size)
+    data_paths, data_steps = learner.rollout(args.timesteps_per_batch / size)
     rollout_time = (time.time() - rollout_start)
 
     # gathering of experience on root process
     gather_start = time.time()
-    n_local = np.array(data.shape[0], dtype = np.int)
-    n_total = np.zeros(size, dtype = np.int)
-    sys.stdout.flush()
-    comm.Allgather(n_local, n_total)
+    sendcounts = np.array(comm.gather(data_steps[0], 0))
     if rank == 0:
-        paths = np.zeros([np.sum(n_total), data.shape[1]])
+        paths = np.empty([np.sum(sendcounts), data_paths.shape[1]], dtype=float)
+        episodes_rewards = np.empty(2, dtype = np.int)
+        sendcounts *= data_paths.shape[1]
     else:
         paths = None
-    sndcounts = tuple(n_total*data.shape[1])
-    offsets = (0,) + tuple(np.cumsum(sndcounts)[0:size-1])
-    comm.Gatherv(data, [paths, sndcounts, offsets, MPI.DOUBLE], root = 0)
+        episodes_rewards = None
+    comm.Gatherv(data_paths, [paths, sendcounts], root = 0)
+    comm.Reduce(data_steps[1:3], episodes_rewards, op=MPI.SUM, root = 0)
     gather_time = (time.time() - gather_start)
 
     # only master process does learning on TF graph
     if rank == 0:
         learn_start = time.time()
         learner.adjust_kl(args.max_kl)
-        new_policy_weights, stats = learner.learn(paths)
+        new_policy_weights, stats = learner.learn(paths, episodes_rewards)
         learn_time = (time.time() - learn_start)
         iteration_time = rollout_time + learn_time + gather_time + bcast_time
 
@@ -117,11 +116,11 @@ while isDone == 0:
         for k, v in stats.items():
             print("\t{} = {:.3f}".format(k,v))
         print(("\nTiming Statistics:"))
-        print(("\tIteration time = %.3f s" % (rollout_time + learn_time + gather_time + bcast_time)))
         print(("\tBroadcast time = %.3f s" % bcast_time))
         print(("\tRollout time = %.3f s" % rollout_time))
         print(("\tGather time = %.3f s" % gather_time))
         print(("\tLearn time = %.3f s" % learn_time))
+        print(("\tTotal iteration time = %.3f s" % (rollout_time + learn_time + gather_time + bcast_time)))
 
         history["rollout_time"].append(rollout_time)
         history["learn_time"].append(learn_time)
@@ -186,9 +185,6 @@ while isDone == 0:
             isDone = 1
     else:
         new_policy_weights = None
-        # totalsteps += args.timesteps_per_batch
-        # if iteration >= args.n_iter or totalsteps >= args.n_steps:
-        #     break
 
     # Check for complete on all processes
     isDone = comm.bcast(isDone, root=0)

@@ -17,22 +17,18 @@ class TRPO():
         self.action_space = env.action_space
         self.env = env
         self.args = args
-        # self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
-        #                  "returns": 5, "advantage": 6}
         self.init_net()
         self.init_work()
 
     def init_net(self):
-        # previously this was all part of makeModel(self) . . .
         self.observation_shape = self.observation_space.shape
         self.observation_size = self.observation_shape[0]
         self.action_size = int(np.prod(self.action_space.shape))
-        keys = ['action_dists_mu', 'action_dists_logstd', 'rewards','actions', 'returns', 'advantage']
+        keys = ['action_dists_mu', 'action_dists_logstd', 'actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
         self.col_orderings['features'] = list(range(self.observation_size*2 + 3))
         self.col_orderings = dict(self.col_orderings,
                                   **{keys[i]: [2*self.observation_size + 3 + i] for i in range(len(keys))})
-        print(self.col_orderings)
         self.paths = []
         config = tf.ConfigProto(
             device_count={'GPU': 0}
@@ -77,7 +73,6 @@ class TRPO():
         self.sff = SetFromFlat(self.session, var_list)
         self.session.run(tf.global_variables_initializer())
         # value function
-        # self.vf = LinearVF(self.ordering)
         self.vf = LinearVF()
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
@@ -104,7 +99,6 @@ class TRPO():
         if self.args.monitor:
             self.env.monitor.start('monitor/', force=True)
         self.set_policy = SetPolicyWeights(self.session, self.net.var_list)
-        # self.average_timesteps_in_episode = 1000
 
     def set_policy_weights(self, parameters):
         self.set_policy(parameters)
@@ -146,46 +140,46 @@ class TRPO():
                 logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
                 logging.debug("In Episode: action_dists_logstd {}".format(action_dists_logstd.shape))
                 logging.debug("In Episode: actions {}".format(actions.shape))
-                logging.debug("In Episode: rewards {}".format(rewards.shape))
+                logging.debug("In Episode: returns {}".format(returns.shape))
                 logging.debug("In Episode: advantage {}".format(advantage.shape))
 
-                path = np.hstack((features, action_dists_mu, action_dists_logstd, rewards,actions, returns, advantage))
-                return path
+                path = np.hstack((features, action_dists_mu, action_dists_logstd, actions, returns, advantage))
+                return path, rewards.sum()
 
     def rollout(self, num_timesteps):
         paths = []
-        steps = 0
-        episode = 0
-        while steps < num_timesteps:
-            paths.append(self.episode())
-            # steps += len(paths[episode][self.ordering["rewards"]])
-            steps += paths[episode].shape[0]
-            episode += 1
-        # self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
+        steps_episodes_rewards = np.zeros(3, dtype=np.int)
+        while steps_episodes_rewards[0] < num_timesteps:
+            path, reward = self.episode()
+            paths.append(path)
+            steps_episodes_rewards[0] += paths[steps_episodes_rewards[1]].shape[0]
+            steps_episodes_rewards[1] += 1
+            steps_episodes_rewards[2] += reward
         paths = np.concatenate(paths,0)
-        return paths
+        return paths, steps_episodes_rewards
 
-    def learn(self, paths):
+    def learn(self, paths, episodes_rewards):
         obs_n = paths[:,self.col_orderings['obs']]
+        action_n = paths[:,self.col_orderings['actions']]
         action_dist_mu = paths[:,self.col_orderings['action_dists_mu']]
         action_dist_logstd = paths[:, self.col_orderings['action_dists_logstd']]
-        action_n = paths[:,self.col_orderings['actions']]
-        rewards = paths[:, self.col_orderings['rewards']]
         advant_n = paths[:,self.col_orderings['advantage']].ravel()
         features = paths[:, self.col_orderings['features']]
+        returns = paths[:, self.col_orderings['returns']]
 
         logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
         logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
         logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
         logging.debug("In Learn: action_n.shape = {}".format(action_n.shape))
         logging.debug("In Learn: advant_n.shape = {}".format(advant_n.shape))
-        logging.debug("In Learn: returns.shape = {}".format(rewards.shape))
+        logging.debug("In Learn: features.shape = {}".format(features.shape))
+        logging.debug("In Learn: returns.shape = {}".format(returns.shape))
 
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
 
         # train value function / baseline on rollout paths
-        self.vf.fit(features, rewards)
+        self.vf.fit(features, returns)
 
         feed_dict = {self.net.obs: obs_n,
                      self.net.action: action_n,
@@ -234,11 +228,11 @@ class TRPO():
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
-        # episoderewards = np.array([path["rewards"].sum() for path in paths])
-        # episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
-        episoderewards = np.sum(paths[:,self.col_orderings['rewards']])  ## MUST FIX THIS FOR PER EPISODE!
+        # mean rewards per episode in this iteration
+        episoderewards = episodes_rewards[1] / episodes_rewards[0]
+
         stats = {}
-        stats["Avg_Reward"] = episoderewards.mean()
+        stats["Avg_Reward"] = episoderewards
         stats["Entropy"] = entropy_after
         stats["Max KL"] = self.args.max_kl
         stats["Timesteps"] = paths.shape[0]
