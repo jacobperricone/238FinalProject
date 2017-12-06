@@ -11,15 +11,14 @@ import random
 
 logging.getLogger().setLevel(logging.INFO)
 
-
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
         self.action_space = env.action_space
         self.env = env
         self.args = args
-        self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
-                         "returns": 5, "advantage": 6}
+        # self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
+        #                  "returns": 5, "advantage": 6}
         self.init_net()
         self.init_work()
 
@@ -78,7 +77,8 @@ class TRPO():
         self.sff = SetFromFlat(self.session, var_list)
         self.session.run(tf.global_variables_initializer())
         # value function
-        self.vf = LinearVF(self.ordering)
+        # self.vf = LinearVF(self.ordering)
+        self.vf = LinearVF()
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
     def calculate_surrogate_loss(self):
@@ -104,7 +104,7 @@ class TRPO():
         if self.args.monitor:
             self.env.monitor.start('monitor/', force=True)
         self.set_policy = SetPolicyWeights(self.session, self.net.var_list)
-        self.average_timesteps_in_episode = 1000
+        # self.average_timesteps_in_episode = 1000
 
     def set_policy_weights(self, parameters):
         self.set_policy(parameters)
@@ -140,6 +140,7 @@ class TRPO():
                 ones_array = np.ones((obs.shape[0], 1))
                 features = np.concatenate([obs, obs**2, range_array, range_array**2, ones_array], axis=1)
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
+
                 logging.debug("In Episode: obs shape {}".format(obs.shape))
                 logging.debug("In Episode: feat shape {}".format(features.shape))
                 logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
@@ -157,16 +158,14 @@ class TRPO():
         episode = 0
         while steps < num_timesteps:
             paths.append(self.episode())
-            steps += len(paths[episode][self.ordering["rewards"]])
+            # steps += len(paths[episode][self.ordering["rewards"]])
+            steps += paths[episode].shape[0]
             episode += 1
-        self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
+        # self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
         paths = np.concatenate(paths,0)
-
         return paths
 
-
     def learn(self, paths):
-
         obs_n = paths[:,self.col_orderings['obs']]
         action_dist_mu = paths[:,self.col_orderings['action_dists_mu']]
         action_dist_logstd = paths[:, self.col_orderings['action_dists_logstd']]
@@ -174,6 +173,7 @@ class TRPO():
         rewards = paths[:, self.col_orderings['rewards']]
         advant_n = paths[:,self.col_orderings['advantage']].ravel()
         features = paths[:, self.col_orderings['features']]
+
         logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
         logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
         logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
@@ -241,7 +241,6 @@ class TRPO():
         stats["Avg_Reward"] = episoderewards.mean()
         stats["Entropy"] = entropy_after
         stats["Max KL"] = self.args.max_kl
-        # stats["Timesteps"] = sum([len(path[self.ordering["rewards"]]) for path in paths])
         stats["Timesteps"] = paths.shape[0]
         stats["Delta_KL"] = kl_after
         stats["Surrogate loss"] = surrogate_after

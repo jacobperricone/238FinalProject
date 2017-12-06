@@ -1,5 +1,3 @@
-from mpi4py import MPI
-
 import tensorflow as tf
 import numpy as np
 import time
@@ -57,14 +55,15 @@ class VF(object):
 class LinearVF(object):
     coeffs = None
 
-    def __init__(self, ordering):
-        self.ordering = ordering
-    #
+    # def __init__(self, ordering):
+        # self.ordering = ordering
+
     # def features(self, obs):
     #     o = obs.astype("float32")
     #     o = o.reshape(o.shape[0], -1)
     #     al = np.arange(o.shape[0]).reshape(-1, 1) / 100.0
     #     return np.concatenate([o, o**2, al, al**2, np.ones((o.shape[0], 1))], axis=1)
+
 
     def fit(self, featmat, returns):   ### IS IT A PROBLEM TO COLLECT FEATURES ON FULL DATA SET??
         featmat = featmat.astype("float32")
@@ -72,7 +71,6 @@ class LinearVF(object):
         n_col = featmat.shape[1]
         lamb = 2.0
         self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
-
 
     def predict(self, features):
         return np.zeros(features.shape[0]) if self.coeffs is None else features.dot(self.coeffs).ravel()

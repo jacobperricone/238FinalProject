@@ -3,13 +3,11 @@ import tensorflow as tf
 import gym
 from utils import *
 from Agents.TRPOAgentNew import *
-
 # from Agents.TRPOAgent import *
 import argparse
 import json
 from mpi4py import MPI
 import sys
-
 
 comm = MPI.COMM_WORLD
 cpu = MPI.Get_processor_name()
@@ -73,13 +71,13 @@ starting_timesteps = args.timesteps_per_batch
 starting_kl = args.max_kl
 
 iteration = 0
+isDone = 0
 
 logging.getLogger().setLevel(logging.INFO)
 
-
-
-while True:
+while isDone == 0:
     iteration += 1
+
     # synchronize model and update actor weights locally
     bcast_start = time.time()
     new_policy_weights = comm.bcast(new_policy_weights, root=0)
@@ -91,29 +89,23 @@ while True:
     data = learner.rollout(args.timesteps_per_batch / size)
     rollout_time = (time.time() - rollout_start)
 
-    # synchronization of experience
+    # gathering of experience on root process
     gather_start = time.time()
     n_local = np.array(data.shape[0], dtype = np.int)
     n_total = np.zeros(size, dtype = np.int)
     sys.stdout.flush()
     comm.Allgather(n_local, n_total)
-
     if rank == 0:
         paths = np.zeros([np.sum(n_total), data.shape[1]])
     else:
         paths = None
-    sys.stdout.flush()
     sndcounts = tuple(n_total*data.shape[1])
     offsets = (0,) + tuple(np.cumsum(sndcounts)[0:size-1])
-    sys.stdout.flush()
     comm.Gatherv(data, [paths, sndcounts, offsets, MPI.DOUBLE], root = 0)
-
     gather_time = (time.time() - gather_start)
-
 
     # only master process does learning on TF graph
     if rank == 0:
-
         learn_start = time.time()
         learner.adjust_kl(args.max_kl)
         new_policy_weights, stats = learner.learn(paths)
@@ -123,14 +115,13 @@ while True:
         print(("\n-------- Iteration %d ----------" % iteration))
         print(("Reward Statistics:"))
         for k, v in stats.items():
-            print("\t{} = {:2.5f}".format(k,v))
+            print("\t{} = {:.3f}".format(k,v))
         print(("\nTiming Statistics:"))
         print(("\tIteration time = %.3f s" % (rollout_time + learn_time + gather_time + bcast_time)))
         print(("\tBroadcast time = %.3f s" % bcast_time))
         print(("\tRollout time = %.3f s" % rollout_time))
         print(("\tGather time = %.3f s" % gather_time))
         print(("\tLearn time = %.3f s" % learn_time))
-
 
         history["rollout_time"].append(rollout_time)
         history["learn_time"].append(learn_time)
@@ -181,27 +172,26 @@ while True:
         # print(("Current step number is " + str(args.timesteps_per_batch) + " and KL is " + str(args.max_kl)))
 
         if iteration % 100 == 0:
-            with open("%s-%s-%f-%f-%f-%f" % (args.task, args.decay_method, starting_timesteps, starting_kl, args.timestep_adapt, args.kl_adapt), "w") as outfile:
+            with open("Results/%s-%s-%f-%f-%f-%f" % (args.task, args.decay_method, starting_timesteps, starting_kl, args.timestep_adapt, args.kl_adapt), "w") as outfile:
                 json.dump(history,outfile)
-
-
 
         # statbar.add(1, [('Iteration Time',iteration_time ), ("Brodcast Time", bcast_start),
         #                  ("Rollout time", rollout_time), ("Gather Time", gather_time),
         #                  ("Learn time", learn_time)] + list(stats.items()))
 
-
         totalsteps += stats["Timesteps"]
         print(("%d total steps have happened (Elapsed time = %.3f s)" % (totalsteps,time.time() - start_time)))
         sys.stdout.flush()
-
         if iteration >= args.n_iter or totalsteps >= args.n_steps:
-            break
+            isDone = 1
     else:
         new_policy_weights = None
-        totalsteps += args.timesteps_per_batch
-        if iteration >= args.n_iter or totalsteps >= args.n_steps:
-            break
+        # totalsteps += args.timesteps_per_batch
+        # if iteration >= args.n_iter or totalsteps >= args.n_steps:
+        #     break
+
+    # Check for complete on all processes
+    isDone = comm.bcast(isDone, root=0)
 
 if rank == 0:
     print("Evaluation complete!")
