@@ -244,6 +244,7 @@ class TRPO():
         stats["Timesteps"] = paths.shape[0]
         stats["Delta_KL"] = kl_after
         stats["Surrogate loss"] = surrogate_after
+        stats["Episodes"] = episodes_rewards[0]
         return self.get_policy(), stats
 
     def save_weights(self, checkpoint_name):

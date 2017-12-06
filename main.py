@@ -129,6 +129,7 @@ while isDone == 0:
         history["mean_reward"].append(stats["Avg_Reward"])
         history["timesteps"].append(args.timesteps_per_batch)
         history["maxkl"].append(args.max_kl)
+        history["Episodes"].append(stats['Episodes'])
 
         recent_total_reward += stats["Avg_Reward"]
 
