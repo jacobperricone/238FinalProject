@@ -11,6 +11,11 @@ import random
 
 logging.getLogger().setLevel(logging.INFO)
 
+CHECKPOINT_DIR = os.path.join(os.getcwd(), 'Checkpoints')
+if not os.path.exists(CHECKPOINT_DIR):
+    os.mkdir(CHECKPOINT_DIR)
+
+
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
@@ -26,9 +31,9 @@ class TRPO():
         self.action_size = int(np.prod(self.action_space.shape))
         keys = ['action_dists_mu', 'action_dists_logstd', 'actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
-        self.col_orderings['features'] = list(range(self.observation_size*2 + 3))
+        self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
         self.col_orderings = dict(self.col_orderings,
-                                  **{keys[i]: [2*self.observation_size + 3 + i] for i in range(len(keys))})
+                                  **{keys[i]: [2 * self.observation_size + 3 + i] for i in range(len(keys))})
         self.paths = []
         config = tf.ConfigProto(
             device_count={'GPU': 0}
@@ -72,6 +77,7 @@ class TRPO():
         # call this to set parameter values
         self.sff = SetFromFlat(self.session, var_list)
         self.session.run(tf.global_variables_initializer())
+        self.saver = tf.train.Saver(var_list)
         # value function
         self.vf = LinearVF()
         self.get_policy = GetPolicyWeights(self.session, var_list)
@@ -127,12 +133,12 @@ class TRPO():
                 action_dists_mu = np.concatenate(action_dists_mu)
                 action_dists_logstd = np.concatenate(action_dists_logstd)
                 actions = np.array(actions)
-                rewards =  np.array(rewards)
+                rewards = np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
-                rewards, returns = map(lambda x: np.expand_dims(x,-1), [rewards, returns])
-                range_array =  np.arange(obs.shape[0]).reshape(-1, 1) / 100.0
+                rewards, returns = map(lambda x: np.expand_dims(x, -1), [rewards, returns])
+                range_array = np.arange(obs.shape[0]).reshape(-1, 1) / 100.0
                 ones_array = np.ones((obs.shape[0], 1))
-                features = np.concatenate([obs, obs**2, range_array, range_array**2, ones_array], axis=1)
+                features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
 
                 logging.debug("In Episode: obs shape {}".format(obs.shape))
@@ -155,15 +161,15 @@ class TRPO():
             steps_episodes_rewards[0] += paths[steps_episodes_rewards[1]].shape[0]
             steps_episodes_rewards[1] += 1
             steps_episodes_rewards[2] += reward
-        paths = np.concatenate(paths,0)
+        paths = np.concatenate(paths, 0)
         return paths, steps_episodes_rewards
 
     def learn(self, paths, episodes_rewards):
-        obs_n = paths[:,self.col_orderings['obs']]
-        action_n = paths[:,self.col_orderings['actions']]
-        action_dist_mu = paths[:,self.col_orderings['action_dists_mu']]
+        obs_n = paths[:, self.col_orderings['obs']]
+        action_n = paths[:, self.col_orderings['actions']]
+        action_dist_mu = paths[:, self.col_orderings['action_dists_mu']]
         action_dist_logstd = paths[:, self.col_orderings['action_dists_logstd']]
-        advant_n = paths[:,self.col_orderings['advantage']].ravel()
+        advant_n = paths[:, self.col_orderings['advantage']].ravel()
         features = paths[:, self.col_orderings['features']]
         returns = paths[:, self.col_orderings['returns']]
 
@@ -239,6 +245,13 @@ class TRPO():
         stats["Delta_KL"] = kl_after
         stats["Surrogate loss"] = surrogate_after
         return self.get_policy(), stats
+
+    def save_weights(self, checkpoint_name):
+        try:
+            save_path = self.saver.save(self.session, os.path.join(CHECKPOINT_DIR, checkpoint_name))
+            logging.info("Saved model to {}".format(save_path))
+        except Exception as e:
+            logging.error("Unable to save checkpoint {}".format(e))
 
     def get_starting_weights(self):
         return self.get_policy()

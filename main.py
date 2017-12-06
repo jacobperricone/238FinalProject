@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser(description='TRPO.')
 
 # these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
-parser.add_argument("--timesteps_per_batch", type=int, default=40000)
+parser.add_argument("--timesteps_per_batch", type=int, default=400)
 parser.add_argument("--n_steps", type=int, default=10000000)
 parser.add_argument("--n_iter", type=int, default=100)
 parser.add_argument("--gamma", type=float, default=.995)
@@ -173,6 +173,8 @@ while isDone == 0:
         if iteration % 100 == 0:
             with open("Results/%s-%s-%f-%f-%f-%f" % (args.task, args.decay_method, starting_timesteps, starting_kl, args.timestep_adapt, args.kl_adapt), "w") as outfile:
                 json.dump(history,outfile)
+
+            learner.save_weights("iter_{}.ckpt".format(iteration))
 
         # statbar.add(1, [('Iteration Time',iteration_time ), ("Brodcast Time", bcast_start),
         #                  ("Rollout time", rollout_time), ("Gather Time", gather_time),
