@@ -59,30 +59,19 @@ class LinearVF(object):
     def __init__(self, ordering):
         self.ordering = ordering
 
-    def _features(self, obs, l):
+    def features(self, obs):
         o = obs.astype("float32")
         o = o.reshape(o.shape[0], -1)
-        # l = len(path["rewards"])
-        al = np.arange(l).reshape(-1, 1) / 100.0
-        return np.concatenate([o, o**2, al, al**2, np.ones((l, 1))], axis=1)
+        al = np.arange(o.shape[0]).reshape(-1, 1) / 100.0
+        return np.concatenate([o, o**2, al, al**2, np.ones((o.shape[0], 1))], axis=1)
 
-    def fit(self, paths):   ### IS IT A PROBLEM TO COLLECT FEATURES ON FULL DATA SET??
-        featmat = self._features(paths[:,self.ordering["obs"]:self.ordering["obs"]+paths.shape[1]-len(self.ordering)+1], paths.shape[0])
-        returns = paths[:,self.ordering["returns"]+paths.shape[1]-len(self.ordering)]
-
-        # print("featmat.shape = {}".format(featmat.shape))
-        # print("returns.shape = {}".format(returns.shape))
-
+    def fit(self, obs, returns):   ### IS IT A PROBLEM TO COLLECT FEATURES ON FULL DATA SET??
+        featmat = self.features(obs)
+        returns = returns
         n_col = featmat.shape[1]
         lamb = 2.0
         self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
 
-    # def fit(self, paths):
-    #     featmat = np.concatenate([self._features(path[self.ordering["obs"]], len(path[self.ordering["rewards"]])) for path in paths])
-    #     returns = np.concatenate([path[self.ordering["returns"]] for path in paths])
-    #     n_col = featmat.shape[1]
-    #     lamb = 2.0
-    #     self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
 
-    def predict(self, obs, l):
-        return np.zeros(l) if self.coeffs is None else self._features(obs,l).dot(self.coeffs)
+    def predict(self, obs):
+        return np.zeros(obs.shape[0]) if self.coeffs is None else self.features(obs).dot(self.coeffs).ravel()
