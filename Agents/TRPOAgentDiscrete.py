@@ -79,8 +79,11 @@ class TRPO():
 
 
         surr = self.calculate_surrogate_loss()
-        kl = tf.reduce_sum(self.calculate_KL(self.net.oldaction_dist_n, self.net.action_dist_n)) / Nf
-        ent =  tf.reduce_sum(self.calculate_entropy(self.net.action_dist_n)) / Nf
+        # kl = tf.reduce_sum(self.calculate_KL(self.net.oldaction_dist_n, self.net.action_dist_n)) / Nf
+        # ent =  tf.reduce_sum(self.calculate_entropy(self.net.action_dist_n)) / Nf
+        #
+        kl = tf.reduce_mean(self.calculate_KL(self.net.oldaction_dist_n, self.net.action_dist_n))
+        ent =  tf.reduce_mean(self.calculate_entropy(self.net.action_dist_n))
         self.losses = [surr, kl, ent]
 
 
