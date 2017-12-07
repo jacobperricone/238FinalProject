@@ -2,8 +2,12 @@ import numpy as np
 import tensorflow as tf
 import gym
 from utils import *
-from Agents.TRPOAgentNew import *
+import os
+import time
+from Agents.TRPOAgentDiscrete import TRPO as TRPOD
+from Agents.TRPOAgentNew  import TRPO
 import argparse
+import logging
 import json
 from mpi4py import MPI
 import sys
@@ -34,6 +38,15 @@ parser.add_argument("--monitor", type=bool, default=False)
 parser.add_argument("--decay_method", type=str, default="none") # adaptive, none
 parser.add_argument("--timestep_adapt", type=int, default=0)
 parser.add_argument("--kl_adapt", type=float, default=0)
+parser.add_argument("--discrete", type=bool, default=True)
+
+
+
+RESULTS_DIR = os.path.join(os.getcwd(), 'Results')
+if not os.path.exists(RESULTS_DIR):
+    os.mkdir(RESULTS_DIR)
+
+
 
 args = parser.parse_args()
 # args.timesteps_per_batch = round(args.timesteps_per_batch*(1-0.8**size)/(1-0.8)/size)*size  # adjust number of timesteps_per_batch for comm.Get_size()
@@ -44,12 +57,17 @@ if rank == 0:
 
 # initialize TRPO learner on all processes, distribute the starting weights
 learner_env = gym.make(args.task)
-learner = TRPO(args, learner_env)
+
+if args.discrete:
+    learner = TRPOD(args, learner_env)
+else:
+    learner = TRPO(args, learner_env)
 if rank == 0:
     # statbar = tf.contrib.keras.utils.Progbar(args.n_iter )
     new_policy_weights = learner.get_starting_weights()
 else:
     new_policy_weights = None
+
 
 start_time = time.time()
 history = {}
@@ -75,7 +93,7 @@ starting_kl = args.max_kl
 iteration = 0
 isDone = 0
 
-logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().setLevel(logging.WARNING)
 
 while isDone == 0:
     iteration += 1

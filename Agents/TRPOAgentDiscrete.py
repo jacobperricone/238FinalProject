@@ -3,18 +3,19 @@ import tensorflow as tf
 import gym
 from utils import *
 from Networks.Baselines import *
-from Networks.ContinuousPolicy import NetworkContinous
-# from Networks.ContinuousPolicy import NetworkDiscrete
+from Networks.ContinuousPolicy import NetworkDiscrete
+
 import time
 import os
 import logging
 import random
 
-logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().setLevel(logging.WARNING)
 
 CHECKPOINT_DIR = os.path.join(os.getcwd(), 'Checkpoints')
 if not os.path.exists(CHECKPOINT_DIR):
     os.mkdir(CHECKPOINT_DIR)
+
 
 class TRPO():
     def __init__(self, args, env):
@@ -29,14 +30,18 @@ class TRPO():
         self.observation_shape = self.observation_space.shape
         self.observation_size = self.observation_shape[0]
 
-        self.action_size = int(np.prod(self.action_space.shape))
+        self.action_size = self.action_space.n
         # self.action_size = self.action_space.n
 
-        keys = ['action_dists_mu', 'action_dists_logstd', 'actions', 'returns', 'advantage']
+        self.net = NetworkDiscrete("discrete", self.env)
+
+
+        keys = ['actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
         self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
+        self.col_orderings['action_dists'] = list(range(self.observation_size * 2 + 3, self.observation_size * 2 + 3 + self.action_size))
         self.col_orderings = dict(self.col_orderings,
-                                  **{keys[i]: [2 * self.observation_size + 3 + i] for i in range(len(keys))})
+                                  **{keys[i]: [2 * self.observation_size + 3 + self.action_size + i] for i in range(len(keys))})
         self.paths = []
         config = tf.ConfigProto(
             device_count={'GPU': 0}
@@ -44,10 +49,9 @@ class TRPO():
         # Initialize Policy Network
         self.session = tf.Session(config=config)
 
-        self.net = NetworkContinous("continuous_policy", self.observation_size, self.action_size)
-        # self.net = NetworkDiscrete("continuous_policy", self.observation_size, self.action_size)
-
         # Calulate Surrogate Loss
+
+
         surr = self.calculate_surrogate_loss()
         kl, ent = self.calculate_KL_and_entropy()
         self.losses = [surr, kl, ent]
@@ -59,7 +63,11 @@ class TRPO():
         self.pg = flatgrad(surr, var_list)
 
         # KL divergence w/ itself, with first argument kept constant.
-        kl_firstfixed = gauss_selfKL_firstfixed(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
+        eps = 1e-6
+        kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
+            self.net.action_dist_n) * tf.log(
+            tf.stop_gradient(self.net.action_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
+
         # gradient of KL w/ itself
         grads = tf.gradients(kl_firstfixed, var_list)
         # what vector we're multiplying by
@@ -89,10 +97,11 @@ class TRPO():
 
     def calculate_surrogate_loss(self):
         # what are the probabilities of taking self.action, given new and old distributions
-        log_p_n = gauss_log_prob(self.net.action_dist_mu, self.net.action_dist_logstd, self.net.action)
-        log_oldp_n = gauss_log_prob(self.net.oldaction_dist_mu, self.net.oldaction_dist_logstd, self.net.action)
-        # tf.exp(log_p_n) / tf.exp(log_oldp_n)
-        ratio = tf.exp(log_p_n - log_oldp_n)
+
+        N = self.net.batch_size
+        p_n = slice_2d(self.net.action_dist_n, tf.range(0, N), self.net.action)
+        old_pn = slice_2d(self.net.oldaction_dist_n, tf.range(0, N), self.net.action)
+        ratio = p_n / old_pn
         # importance sampling of surrogate loss (L in paper)
         surr = -tf.reduce_mean(ratio * self.net.advantage)
         return surr
@@ -101,9 +110,12 @@ class TRPO():
         eps = 1e-8
         batch_size_float = tf.cast(self.net.batch_size, tf.float32)
         # kl divergence and shannon entropy
-        kl = gauss_KL(self.net.oldaction_dist_mu, self.net.oldaction_dist_logstd, self.net.action_dist_mu,
-                      self.net.action_dist_logstd) / batch_size_float
-        ent = gauss_ent(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
+
+        kl = tf.reduce_sum(self.net.oldaction_dist_n *
+                           tf.log(
+                               (self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
+        ent = tf.reduce_sum(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps)) / batch_size_float
+
         return kl, ent
 
     def init_work(self):
@@ -116,36 +128,26 @@ class TRPO():
 
     def act(self, obs):
         obs = np.expand_dims(obs, 0)
-        action_dist_mu, action_dist_logstd = self.session.run([self.net.action_dist_mu, self.net.action_dist_logstd],
-                                                              feed_dict={self.net.obs: obs})
-        act = action_dist_mu + np.exp(action_dist_logstd) * np.random.randn(*action_dist_logstd.shape)
-        return act.ravel(), action_dist_mu, action_dist_logstd
+        new_outputs = self.net.act(self.session, obs)
+        return new_outputs
 
     def episode(self, num_timesteps=0):
         if num_timesteps == 0:
             num_timesteps = self.args.max_pathlength-1
-        obs, actions, rewards, action_dists_mu, action_dists_logstd = [], [], [], [], []
+        obs, actions, action_dists, rewards, actions = [], [], [], [], []
         ob = list(filter(self.env.reset()))
         for i in range(self.args.max_pathlength - 1):
             obs.append(ob)
-            action, action_dist_mu, action_dist_logstd = self.act(ob)
-
-            # print("action_size = {}".format(self.action_size))
-            # print("action.shape = {}".format(action.shape))
-            # print("action_dist_mu.shape = {}".format(action_dist_mu.shape))
-            # print("action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
-
+            action, action_dist = self.act(ob)
             actions.append(action)
-            action_dists_mu.append(action_dist_mu)
-            action_dists_logstd.append(action_dist_logstd)
+            action_dists.append(action_dist)
             res = self.env.step(int(action))
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps - 1:
                 obs = np.concatenate(np.expand_dims(obs, 0))
-                action_dists_mu = np.concatenate(action_dists_mu)
-                action_dists_logstd = np.concatenate(action_dists_logstd)
-                actions = np.array(actions)
+                action_dists = np.concatenate(action_dists)
+                actions = np.expand_dims(np.array(actions),-1)
                 rewards = np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
                 rewards, returns = map(lambda x: np.expand_dims(x, -1), [rewards, returns])
@@ -154,15 +156,15 @@ class TRPO():
                 features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
 
-                # logging.debug("In Episode: obs shape {}".format(obs.shape))
-                # logging.debug("In Episode: feat shape {}".format(features.shape))
-                # logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
-                # logging.debug("In Episode: action_dists_logstd {}".format(action_dists_logstd.shape))
-                # logging.debug("In Episode: actions {}".format(actions.shape))
-                # logging.debug("In Episode: returns {}".format(returns.shape))
-                # logging.debug("In Episode: advantage {}".format(advantage.shape))
+                logging.info("In Episode: obs shape {}".format(obs.shape))
+                logging.info("In Episode: feat shape {}".format(features.shape))
+                logging.info("In Episode: actions {}".format(actions.shape))
+                logging.info("In Episode: returns {}".format(returns.shape))
+                logging.info("In Episode: advantage {}".format(advantage.shape))
+                logging.info("In Episode: advantage {}".format(action_dists.shape))
 
-                path = np.hstack((features, action_dists_mu, action_dists_logstd, actions, returns, advantage))
+                path = np.hstack((features, action_dists, actions, returns, advantage))
+
                 return path, rewards.sum()
 
     def rollout(self, num_timesteps):
@@ -194,13 +196,15 @@ class TRPO():
     #     return paths, steps_episodes_rewards
 
     def learn(self, paths, episodes_rewards):
+
         obs_n = paths[:, self.col_orderings['obs']]
-        action_n = paths[:, self.col_orderings['actions']]
-        action_dist_mu = paths[:, self.col_orderings['action_dists_mu']]
-        action_dist_logstd = paths[:, self.col_orderings['action_dists_logstd']]
+        action_n = paths[:, self.col_orderings['actions']].ravel()
         advant_n = paths[:, self.col_orderings['advantage']].ravel()
         features = paths[:, self.col_orderings['features']]
         returns = paths[:, self.col_orderings['returns']]
+        action_dist_n = paths[:, self.col_orderings['action_dists']]
+
+        # print(returns)
 
         # logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
         # logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
@@ -219,9 +223,10 @@ class TRPO():
         feed_dict = {self.net.obs: obs_n,
                      self.net.action: action_n,
                      self.net.advantage: advant_n,
-                     self.net.oldaction_dist_mu: action_dist_mu,
-                     self.net.oldaction_dist_logstd: action_dist_logstd}
+                     self.net.oldaction_dist_n: action_dist_n}
 
+        for k,v in feed_dict.items():
+            logging.debug(v.shape)
         # parameters
         thprev = self.gf()
 
