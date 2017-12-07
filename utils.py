@@ -1,5 +1,4 @@
 from mpi4py import MPI
-
 import tensorflow as tf
 import numpy as np
 import scipy.signal
@@ -172,7 +171,7 @@ class SetPolicyWeights(object):
             count += 1
         self.session.run(self.assigns, feed_dict)
 
-def xavier_initializer(self, shape):
+def xavier_initializer(shape):
     dim_sum = np.sum(shape)
     if len(shape) == 1:
         dim_sum += 1
@@ -185,3 +184,29 @@ def fully_connected(input_layer, input_size, output_size, weight_init, bias_init
         # w = tf.Variable(xavier_initializer([input_size, output_size]), name="w")
         b = tf.get_variable("b", [output_size], initializer=bias_init)
     return tf.matmul(input_layer,w) + b
+
+def gather_paths(data_paths, data_rewards, comm, size, rank):
+    # gather if we have equal time steps per process
+    if rank == 0:
+        paths = np.empty([size*data_paths.shape[0], data_paths.shape[1]], dtype=np.float)
+        episodes_rewards = np.empty(2, dtype = np.int)
+    else:
+        paths = None
+        episodes_rewards = None
+    comm.Gather(data_paths, paths, root = 0)
+    comm.Reduce(data_rewards, episodes_rewards, op=MPI.SUM, root = 0)
+    return paths, episodes_rewards
+
+# def gather_paths(data_paths, data_steps, comm, size, rank):
+#     # gather if we have equal episodes per process
+#     sendcounts = np.array(comm.gather(data_steps[0], 0))
+#     if rank == 0:
+#         paths = np.empty([np.sum(sendcounts), data_paths.shape[1]], dtype=float)
+#         episodes_rewards = np.empty(2, dtype = np.int)
+#         sendcounts *= data_paths.shape[1]
+#     else:
+#         paths = None
+#         episodes_rewards = None
+#     comm.Gatherv(data_paths, [paths, sendcounts], root = 0)
+#     comm.Reduce(data_steps[1:3], episodes_rewards, op=MPI.SUM, root = 0)
+#     return paths, episodes_rewards

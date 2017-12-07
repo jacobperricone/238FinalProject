@@ -4,6 +4,7 @@ import gym
 from utils import *
 from Networks.Baselines import *
 from Networks.ContinuousPolicy import NetworkContinous
+# from Networks.ContinuousPolicy import NetworkDiscrete
 import time
 import os
 import logging
@@ -27,7 +28,10 @@ class TRPO():
     def init_net(self):
         self.observation_shape = self.observation_space.shape
         self.observation_size = self.observation_shape[0]
+
         self.action_size = int(np.prod(self.action_space.shape))
+        # self.action_size = self.action_space.n
+
         keys = ['action_dists_mu', 'action_dists_logstd', 'actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
         self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
@@ -39,7 +43,9 @@ class TRPO():
         )
         # Initialize Policy Network
         self.session = tf.Session(config=config)
+
         self.net = NetworkContinous("continuous_policy", self.observation_size, self.action_size)
+        # self.net = NetworkDiscrete("continuous_policy", self.observation_size, self.action_size)
 
         # Calulate Surrogate Loss
         surr = self.calculate_surrogate_loss()
@@ -115,20 +121,26 @@ class TRPO():
         act = action_dist_mu + np.exp(action_dist_logstd) * np.random.randn(*action_dist_logstd.shape)
         return act.ravel(), action_dist_mu, action_dist_logstd
 
-    # def episode(self):
-    def episode(self, num_timesteps):
+    def episode(self, num_timesteps=0):
+        if num_timesteps == 0:
+            num_timesteps = self.args.max_pathlength-1
         obs, actions, rewards, action_dists_mu, action_dists_logstd = [], [], [], [], []
         ob = list(filter(self.env.reset()))
         for i in range(self.args.max_pathlength - 1):
             obs.append(ob)
             action, action_dist_mu, action_dist_logstd = self.act(ob)
+
+            # print("action_size = {}".format(self.action_size))
+            # print("action.shape = {}".format(action.shape))
+            # print("action_dist_mu.shape = {}".format(action_dist_mu.shape))
+            # print("action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
+
             actions.append(action)
             action_dists_mu.append(action_dist_mu)
             action_dists_logstd.append(action_dist_logstd)
             res = self.env.step(int(action))
             ob = list(filter(res[0]))
             rewards.append((res[1]))
-            # if res[2] or i == self.args.max_pathlength - 2:
             if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps - 1:
                 obs = np.concatenate(np.expand_dims(obs, 0))
                 action_dists_mu = np.concatenate(action_dists_mu)
@@ -154,6 +166,7 @@ class TRPO():
                 return path, rewards.sum()
 
     def rollout(self, num_timesteps):
+        # for equal timestep rollouts
         paths = []
         episodes_rewards = np.zeros(2, dtype=np.int)
         steps = 0
@@ -166,6 +179,19 @@ class TRPO():
                 episodes_rewards[1] += reward
         paths = np.concatenate(paths, 0)
         return paths, episodes_rewards
+
+    # def rollout(self, num_timesteps):
+    #     # for equal number of episode rollouts
+    #     paths = []
+    #     steps_episodes_rewards = np.zeros(3, dtype=np.int)
+    #     while steps_episodes_rewards[0] < num_timesteps:
+    #         path, reward = self.episode()
+    #         steps_episodes_rewards[0] += path.shape[0]
+    #         paths.append(path)
+    #         steps_episodes_rewards[1] += 1
+    #         steps_episodes_rewards[2] += reward
+    #     paths = np.concatenate(paths, 0)
+    #     return paths, steps_episodes_rewards
 
     def learn(self, paths, episodes_rewards):
         obs_n = paths[:, self.col_orderings['obs']]

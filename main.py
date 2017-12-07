@@ -93,14 +93,7 @@ while isDone == 0:
 
     # gathering of experience on root process
     gather_start = time.time()
-    if rank == 0:
-        paths = np.empty([size*data_paths.shape[0], data_paths.shape[1]], dtype=np.float)
-        episodes_rewards = np.empty(2, dtype = np.int)
-    else:
-        paths = None
-        episodes_rewards = None
-    comm.Gather(data_paths, paths, root = 0)
-    comm.Reduce(data_rewards, episodes_rewards, op=MPI.SUM, root = 0)
+    paths, episodes_rewards = gather_paths(data_paths, data_rewards, comm, size, rank)
     gather_time = (time.time() - gather_start)
 
     # only master process does learning on TF graph
