@@ -44,7 +44,7 @@ class TRPO():
         # Initialize Policy Network
         self.session = tf.Session(config=config)
 
-        self.net = NetworkContinous("continuous_policy", self.observation_size, self.action_size)
+        self.net = NetworkContinous("continuous_policy", self.env)
         # self.net = NetworkDiscrete("continuous_policy", self.observation_size, self.action_size)
 
         # Calulate Surrogate Loss
@@ -254,6 +254,11 @@ class TRPO():
             self.sff(th)
             # surrogate loss: policy gradient loss
             return self.session.run(self.losses[0], feed_dict)
+
+        def loss2(th):
+            self.sff(th)
+            # surrogate loss: policy gradient loss
+            return self.session.run(self.losses, feed_dict)
 
         # finds best parameter by starting with a big step and working backwards
         theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir / lm)

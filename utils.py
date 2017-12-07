@@ -121,6 +121,18 @@ def linesearch(f, x, fullstep, expected_improve_rate):
             return xnew
     return x
 
+
+def linesearch2(f, x, fullstep, expected_improve_rate, max_kl):
+    max_backtracks = 10
+    fval, old_kl, entropy = f(x)
+    for (_n_backtracks, stepfrac) in enumerate(.5**np.arange(max_backtracks)):
+        xnew = x + stepfrac * fullstep
+        newfval, new_kl, new_ent= f(xnew)
+        if newfval<fval and new_kl<=max_kl:
+            max_kl *=1.002
+            return xnew
+    return x
+
 class SetFromFlat(object):
     def __init__(self, session, var_list):
         self.session = session
