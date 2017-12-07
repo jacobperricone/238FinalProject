@@ -108,13 +108,10 @@ class TRPO():
 
     def calculate_KL_and_entropy(self):
         eps = 1e-8
-        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
         # kl divergence and shannon entropy
 
-        kl = tf.reduce_sum(self.net.oldaction_dist_n *
-                           tf.log(
-                               (self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
-        ent = tf.reduce_sum(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps)) / batch_size_float
+        kl = tf.reduce_mean(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps)))
+        ent = tf.reduce_mean(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps))
 
         return kl, ent
 
@@ -248,11 +245,12 @@ class TRPO():
         # and then stepdir * [above] is computed manually.
         shs = 0.5 * stepdir.dot(fisher_vector_product(stepdir))
 
-        lm = np.sqrt(shs / self.args.max_kl)
+        # lm = np.sqrt(shs / 2.0*self.args.max_kl)
         # if self.args.max_kl > 0.001:
         #     self.args.max_kl *= self.args.kl_anneal
 
-        fullstep = stepdir / lm
+        # fullstep = stepdir * np.sqrt(self.args.max_kl / shs)
+        fullstep = stepdir * np.sqrt(2.0 * self.args.max_kl / shs)
         negative_g_dot_steppdir = -g.dot(stepdir)
 
         def loss(th):
@@ -260,11 +258,28 @@ class TRPO():
             # surrogate loss: policy gradient loss
             return self.session.run(self.losses[0], feed_dict)
 
+
+
+        # New loss for diff line search
+        def loss2(th):
+            self.sff(th)
+            # surrogate loss: policy gradient loss
+            return self.session.run(self.losses, feed_dict)
+
+
         # finds best parameter by starting with a big step and working backwards
-        theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir / lm)
-        # i guess we just take a fullstep no matter what
-        theta = thprev + fullstep
+        theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir)
+
+        # New line search
+
+        # theta = linesearch2(loss2, thprev, fullstep, negative_g_dot_steppdir, self.args.max_kl)
         self.sff(theta)
+
+
+
+        #STUPID
+        # theta = thprev + fullstep
+
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 

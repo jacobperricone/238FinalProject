@@ -48,7 +48,7 @@ class NetworkDiscrete(object):
         self.env = env
         self.observation_size = self.env.observation_space.shape[0]
         self.action_size = self.env.action_space.n
-        self.hidden_size = 64
+        self.hidden_size = 32
 
         with tf.variable_scope("%s_shared" % scope):
             self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
@@ -58,8 +58,8 @@ class NetworkDiscrete(object):
 
 
             self.action_dist_n, _ = (pt.wrap(self.obs).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
+                                fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
+                                fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
                                 softmax_classifier(self.action_size))
 
             self.batch_size =  tf.shape(self.obs)[0]
