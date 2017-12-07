@@ -166,32 +166,32 @@ class TRPO():
                 return path, rewards.sum()
 
     def rollout(self, num_timesteps):
-        # for equal timestep rollouts
         paths = []
-        episodes_rewards = np.zeros(2, dtype=np.int)
-        steps = 0
-        while steps < num_timesteps:
-            path, reward = self.episode(num_timesteps - steps)
-            steps += path.shape[0]
-            paths.append(path)
-            if (steps < num_timesteps):  # only record full episodes for averaging!
-                episodes_rewards[0] += 1
-                episodes_rewards[1] += reward
+        if self.args.parallel_balancing == "timesteps":  # for equal timestep rollouts
+            steps_episodes_rewards = np.zeros(2, dtype=np.int)
+            steps = 0
+            while steps < num_timesteps:
+                path, reward = self.episode(num_timesteps - steps)
+                steps += path.shape[0]
+                paths.append(path)
+                if (steps < num_timesteps):  # only record full episodes for averaging!
+                    steps_episodes_rewards[0] += 1
+                    steps_episodes_rewards[1] += reward
+            paths = np.concatenate(paths, 0)
+            return paths, episodes_rewards
+        elif self.args.parallel_balancing == "episodes":  # for equal number of episode rollouts
+            steps_episodes_rewards = np.zeros(3, dtype=np.int)
+            while steps_episodes_rewards[0] < num_timesteps:
+                path, reward = self.episode()
+                steps_episodes_rewards[0] += path.shape[0]
+                paths.append(path)
+                steps_episodes_rewards[1] += 1
+                steps_episodes_rewards[2] += reward
+        else:
+            print("*** Problem in rollout(): invalid parallel balancing strategy")
+            exit()
         paths = np.concatenate(paths, 0)
-        return paths, episodes_rewards
-
-    # def rollout(self, num_timesteps):
-    #     # for equal number of episode rollouts
-    #     paths = []
-    #     steps_episodes_rewards = np.zeros(3, dtype=np.int)
-    #     while steps_episodes_rewards[0] < num_timesteps:
-    #         path, reward = self.episode()
-    #         steps_episodes_rewards[0] += path.shape[0]
-    #         paths.append(path)
-    #         steps_episodes_rewards[1] += 1
-    #         steps_episodes_rewards[2] += reward
-    #     paths = np.concatenate(paths, 0)
-    #     return paths, steps_episodes_rewards
+        return paths, steps_episodes_rewards
 
     def learn(self, paths, episodes_rewards):
         obs_n = paths[:, self.col_orderings['obs']]
