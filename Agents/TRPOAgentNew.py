@@ -161,7 +161,7 @@ class TRPO():
             path, reward = self.episode(num_timesteps - steps - 1)
             steps += path.shape[0]
             paths.append(path)
-            if (steps < num_timesteps)
+            if (steps < num_timesteps):
                 episodes_rewards[0] += 1
                 episodes_rewards[1] += reward
         paths = np.concatenate(paths, 0)

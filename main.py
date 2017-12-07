@@ -181,7 +181,7 @@ while isDone == 0:
         if iteration % 10 == 0:
             with open("Results/%s-%s-%f-%f-%f-%f" % (args.task, args.decay_method, starting_timesteps, starting_kl, args.timestep_adapt, args.kl_adapt), "w") as outfile:
                 json.dump(history,outfile)
-            learner.save_weights("iter_{}.ckpt".format(iteration))
+            learner.save_weights("{}-iter_{}.ckpt".format(args.task,iteration))
 
         # statbar.add(1, [('Iteration Time',iteration_time ), ("Brodcast Time", bcast_start),
         #                  ("Rollout time", rollout_time), ("Gather Time", gather_time),
