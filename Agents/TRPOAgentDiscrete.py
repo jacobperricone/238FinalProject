@@ -48,25 +48,16 @@ class TRPO():
         )
         # Initialize Policy Network
         self.session = tf.Session(config=config)
-
-        # Calulate Surrogate Loss
-
-
-        surr = self.calculate_surrogate_loss()
-        kl, ent = self.calculate_KL_and_entropy()
-        self.losses = [surr, kl, ent]
-
-        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
         var_list = self.net.var_list
 
-        # policy gradient
-        self.pg = flatgrad(surr, var_list)
-
+        Nf = tf.cast(tf.shape(self.net.obs)[0], tf.float32)
         # KL divergence w/ itself, with first argument kept constant.
         eps = 1e-6
-        kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
-            self.net.action_dist_n) * tf.log(
-            tf.stop_gradient(self.net.action_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
+        action_fixed = tf.stop_gradient( self.net.action_dist_n)
+        kl_firstfixed = tf.reduce_sum(self.calculate_KL(action_fixed, self.net.action_dist_n)) / Nf
+
+        # tf.reduce_sum(tf.reduce_sum( * tf.log(
+        # tf.stop_gradient(self.net.action_dist_n + eps) / (self.net.action_dist_n + eps)), axis = 1)) / batch_size_float
 
         # gradient of KL w/ itself
         grads = tf.gradients(kl_firstfixed, var_list)
@@ -85,6 +76,17 @@ class TRPO():
         gvp = [tf.reduce_sum(g * t) for (g, t) in zip(grads, tangents)]
         # 2nd gradient of KL w/ itself * tangent
         self.fvp = flatgrad(gvp, var_list)
+
+
+        surr = self.calculate_surrogate_loss()
+        kl = tf.reduce_sum(self.calculate_KL(self.net.oldaction_dist_n, self.net.action_dist_n)) / Nf
+        ent =  tf.reduce_sum(self.calculate_entropy(self.net.action_dist_n)) / Nf
+        self.losses = [surr, kl, ent]
+
+
+        # policy gradient
+        self.pg = flatgrad(surr, var_list)
+
         # the actual parameter values
         self.gf = GetFlat(self.session, var_list)
         # call this to set parameter values
@@ -98,7 +100,7 @@ class TRPO():
     def calculate_surrogate_loss(self):
         # what are the probabilities of taking self.action, given new and old distributions
 
-        N = self.net.batch_size
+        N =  tf.shape(self.net.obs)[0]
         p_n = slice_2d(self.net.action_dist_n, tf.range(0, N), self.net.action)
         old_pn = slice_2d(self.net.oldaction_dist_n, tf.range(0, N), self.net.action)
         ratio = p_n / old_pn
@@ -106,14 +108,17 @@ class TRPO():
         surr = -tf.reduce_mean(ratio * self.net.advantage)
         return surr
 
-    def calculate_KL_and_entropy(self):
+    def calculate_KL(self, prob0, prob1):
         eps = 1e-8
         # kl divergence and shannon entropy
+        kl = tf.reduce_sum(prob0 * tf.log((prob0 + eps) / (prob1 + eps)), axis = 1)
+        return kl
 
-        kl = tf.reduce_mean(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps)))
-        ent = tf.reduce_mean(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps))
 
-        return kl, ent
+    def calculate_entropy(self, prob):
+        eps = 1e-8
+        ent = tf.reduce_sum(-prob * tf.log(prob + eps), axis = 1)
+        return ent
 
     def init_work(self):
         if self.args.monitor:
@@ -217,6 +222,7 @@ class TRPO():
         # train value function / baseline on rollout paths
         self.vf.fit(features, returns)
 
+
         feed_dict = {self.net.obs: obs_n,
                      self.net.action: action_n,
                      self.net.advantage: advant_n,
@@ -244,31 +250,30 @@ class TRPO():
         # ([Fisher Information Matrix] * stepdir) is computed using the function,
         # and then stepdir * [above] is computed manually.
         shs = 0.5 * stepdir.dot(fisher_vector_product(stepdir))
+        # lm = np.sqrt(shs / 2*self.args.max_kl)
+        lm = np.sqrt(shs / self.args.max_kl)
 
-        # lm = np.sqrt(shs / 2.0*self.args.max_kl)
-        # if self.args.max_kl > 0.001:
-        #     self.args.max_kl *= self.args.kl_anneal
-
-        # fullstep = stepdir * np.sqrt(self.args.max_kl / shs)
-        fullstep = stepdir * np.sqrt(2.0 * self.args.max_kl / shs)
+        fullstep = stepdir / lm
         negative_g_dot_steppdir = -g.dot(stepdir)
+
 
         def loss(th):
             self.sff(th)
             # surrogate loss: policy gradient loss
             return self.session.run(self.losses[0], feed_dict)
 
-
-
-        # New loss for diff line search
         def loss2(th):
             self.sff(th)
             # surrogate loss: policy gradient loss
             return self.session.run(self.losses, feed_dict)
 
-
         # finds best parameter by starting with a big step and working backwards
-        theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir)
+        theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir/lm)
+        # i guess we just take a fullstep no matter what
+        # theta = thprev + fullstep
+        self.sff(theta)
+
+        surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
         # New line search
 
