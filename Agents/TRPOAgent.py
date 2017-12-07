@@ -3,78 +3,57 @@ import tensorflow as tf
 import gym
 from utils import *
 from Networks.Baselines import *
+from Networks.ContinuousPolicy import NetworkContinous
 import time
 import os
 import logging
 import random
+import sys
+
+logging.getLogger().setLevel(logging.WARNING)
+
+CHECKPOINT_DIR = os.path.join(os.getcwd(), 'Checkpoints')
+if not os.path.exists(CHECKPOINT_DIR):
+    os.mkdir(CHECKPOINT_DIR)
 
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
-        self.action_space =env.action_space
+        self.action_space = env.action_space
         self.env = env
         self.args = args
-        self.ordering = {"obs": 0, "action_dists_mu": 1, "action_dists_logstd": 2, "rewards": 3, "actions": 4,
-                         "returns": 5, "advantage": 6}
         self.init_net()
         self.init_work()
 
-
     def init_net(self):
-        # previously this was all part of makeModel(self) . . .
-        self.observation_size = self.observation_space.shape[0]
+        self.observation_shape = self.observation_space.shape
+        self.observation_size = self.observation_shape[0]
         self.action_size = int(np.prod(self.action_space.shape))
-        self.hidden_size = 64
-
-        weight_init = tf.random_uniform_initializer(-0.05, 0.05)
-        bias_init = tf.constant_initializer(0)
-
+        keys = ['action_dists_mu', 'action_dists_logstd', 'actions', 'returns', 'advantage']
+        self.col_orderings = {'obs': list(range(self.observation_size))}
+        self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
+        self.col_orderings = dict(self.col_orderings,
+                                  **{keys[i]: [2 * self.observation_size + 3 + i] for i in range(len(keys))})
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
+        # Initialize Policy Network
         self.session = tf.Session(config=config)
-        self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
-        self.action = tf.placeholder(tf.float32, [None, self.action_size])
-        self.advantage = tf.placeholder(tf.float32, [None])
-        self.oldaction_dist_mu = tf.placeholder(tf.float32, [None, self.action_size])
-        self.oldaction_dist_logstd = tf.placeholder(tf.float32, [None, self.action_size])
+        self.net = NetworkContinous("continuous_policy", self.env)
 
-        with tf.variable_scope("policy"):
-            h1 = fully_connected(self.obs, self.observation_size, self.hidden_size, weight_init, bias_init, "policy_h1")
-            h1 = tf.nn.relu(h1)
-            h2 = fully_connected(h1, self.hidden_size, self.hidden_size, weight_init, bias_init, "policy_h2")
-            h2 = tf.nn.relu(h2)
-            h3 = fully_connected(h2, self.hidden_size, self.action_size, weight_init, bias_init, "policy_h3")
-            action_dist_logstd_param = tf.Variable((.01 * np.random.randn(1, self.action_size)).astype(np.float32),
-                                                   name="policy_logstd")
-        # means for each action
-        self.action_dist_mu = h3
-        # log standard deviations for each actions
-        self.action_dist_logstd = tf.tile(action_dist_logstd_param, tf.stack((tf.shape(self.action_dist_mu)[0], 1)))
-        batch_size = tf.shape(self.obs)[0]
-        # what are the probabilities of taking self.action, given new and old distributions
-        log_p_n = gauss_log_prob(self.action_dist_mu, self.action_dist_logstd, self.action)
-        log_oldp_n = gauss_log_prob(self.oldaction_dist_mu, self.oldaction_dist_logstd, self.action)
-
-        # tf.exp(log_p_n) / tf.exp(log_oldp_n)
-        ratio = tf.exp(log_p_n - log_oldp_n)
-        # importance sampling of surrogate loss (L in paper)
-        surr = -tf.reduce_mean(ratio * self.advantage)
-        var_list = tf.trainable_variables()
-
-        eps = 1e-8
-        batch_size_float = tf.cast(batch_size, tf.float32)
-        # kl divergence and shannon entropy
-        kl = gauss_KL(self.oldaction_dist_mu, self.oldaction_dist_logstd, self.action_dist_mu,
-                      self.action_dist_logstd) / batch_size_float
-        ent = gauss_ent(self.action_dist_mu, self.action_dist_logstd) / batch_size_float
-
+        # Calulate Surrogate Loss
+        surr = self.calculate_surrogate_loss()
+        kl, ent = self.calculate_KL_and_entropy()
         self.losses = [surr, kl, ent]
+
+        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
+        var_list = self.net.var_list
+
         # policy gradient
         self.pg = flatgrad(surr, var_list)
 
         # KL divergence w/ itself, with first argument kept constant.
-        kl_firstfixed = gauss_selfKL_firstfixed(self.action_dist_mu, self.action_dist_logstd) / batch_size_float
+        kl_firstfixed = gauss_selfKL_firstfixed(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
         # gradient of KL w/ itself
         grads = tf.gradients(kl_firstfixed, var_list)
         # what vector we're multiplying by
@@ -88,7 +67,6 @@ class TRPO():
             tangents.append(param)
             start += size
 
-
         # gradient of KL w/ itself * tangent
         gvp = [tf.reduce_sum(g * t) for (g, t) in zip(grads, tangents)]
         # 2nd gradient of KL w/ itself * tangent
@@ -98,32 +76,46 @@ class TRPO():
         # call this to set parameter values
         self.sff = SetFromFlat(self.session, var_list)
         self.session.run(tf.global_variables_initializer())
+        self.saver = tf.train.Saver(var_list)
         # value function
-        # self.vf = VF(self.session)
-
-        self.vf = LinearVF(self.ordering)
+        self.vf = LinearVF()
         self.get_policy = GetPolicyWeights(self.session, var_list)
+
+    def calculate_surrogate_loss(self):
+        # what are the probabilities of taking self.action, given new and old distributions
+        log_p_n = gauss_log_prob(self.net.action_dist_mu, self.net.action_dist_logstd, self.net.action)
+        log_oldp_n = gauss_log_prob(self.net.oldaction_dist_mu, self.net.oldaction_dist_logstd, self.net.action)
+        # tf.exp(log_p_n) / tf.exp(log_oldp_n)
+        ratio = tf.exp(log_p_n - log_oldp_n)
+        # importance sampling of surrogate loss (L in paper)
+        surr = -tf.reduce_mean(ratio * self.net.advantage)
+        return surr
+
+    def calculate_KL_and_entropy(self):
+        eps = 1e-8
+        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
+        # kl divergence and shannon entropy
+        kl = gauss_KL(self.net.oldaction_dist_mu, self.net.oldaction_dist_logstd, self.net.action_dist_mu,
+                      self.net.action_dist_logstd) / batch_size_float
+        ent = gauss_ent(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
+        return kl, ent
 
     def init_work(self):
         if self.args.monitor:
             self.env.monitor.start('monitor/', force=True)
-
-        self.set_policy = SetPolicyWeights(self.session, tf.trainable_variables())
-        self.average_timesteps_in_episode = 1000
+        self.set_policy = SetPolicyWeights(self.session, self.net.var_list)
 
     def set_policy_weights(self, parameters):
         self.set_policy(parameters)
 
-
     def act(self, obs):
         obs = np.expand_dims(obs, 0)
-        action_dist_mu, action_dist_logstd = self.session.run([self.action_dist_mu, self.action_dist_logstd], feed_dict={self.obs: obs})
-
-        act = action_dist_mu + np.exp(action_dist_logstd)*np.random.randn(*action_dist_logstd.shape)
+        action_dist_mu, action_dist_logstd = self.session.run([self.net.action_dist_mu, self.net.action_dist_logstd],
+                                                              feed_dict={self.net.obs: obs})
+        act = action_dist_mu + np.exp(action_dist_logstd) * np.random.randn(*action_dist_logstd.shape)
         return act.ravel(), action_dist_mu, action_dist_logstd
 
-
-    def episode(self):
+    def episode(self, num_timesteps=sys.maxsize):
         obs, actions, rewards, action_dists_mu, action_dists_logstd = [], [], [], [], []
         ob = list(filter(self.env.reset()))
         for i in range(self.args.max_pathlength - 1):
@@ -135,54 +127,84 @@ class TRPO():
             res = self.env.step(int(action))
             ob = list(filter(res[0]))
             rewards.append((res[1]))
-            if res[2] or i == self.args.max_pathlength - 2:
-                obs = np.expand_dims(obs, 0)
-                path = list(map(lambda x: np.concatenate(x), [obs, action_dists_mu, action_dists_logstd]))
+            if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps - 1:
+                obs = np.concatenate(np.expand_dims(obs, 0))
+                action_dists_mu = np.concatenate(action_dists_mu)
+                action_dists_logstd = np.concatenate(action_dists_logstd)
+                actions = np.array(actions)
                 rewards = np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
-                advantage = np.array(rewards) - self.vf.predict(path[0],len(rewards))
-                path.extend([rewards, np.array(actions), returns, advantage])
-                # print("obs.shape = {}".format(np.concatenate(obs).shape))
-                # print("action_dists_mu.shape = {}".format(np.concatenate(action_dists_mu).shape))
-                # print("action_dists_logstd.shape = {}".format(np.concatenate(action_dists_logstd).shape))
-                # print("actions.shape = {}".format(np.array(actions).shape))
-                # print("rewards.shape = {}".format(rewards.shape))
-                # print("returns.shape = {}".format(returns.shape))
-                # print("advantage.shape = {}".format(advantage.shape))
-                # print("len(path) = {}".format(len(path)))
-                return path
+                rewards, returns = map(lambda x: np.expand_dims(x, -1), [rewards, returns])
+                range_array = np.arange(obs.shape[0]).reshape(-1, 1) / 100.0
+                ones_array = np.ones((obs.shape[0], 1))
+                features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
+                advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
+
+                # logging.debug("In Episode: obs shape {}".format(obs.shape))
+                # logging.debug("In Episode: feat shape {}".format(features.shape))
+                # logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
+                # logging.debug("In Episode: action_dists_logstd {}".format(action_dists_logstd.shape))
+                # logging.debug("In Episode: actions {}".format(actions.shape))
+                # logging.debug("In Episode: returns {}".format(returns.shape))
+                # logging.debug("In Episode: advantage {}".format(advantage.shape))
+
+                path = np.hstack((features, action_dists_mu, action_dists_logstd, actions, returns, advantage))
+                return path, rewards.sum()
 
     def rollout(self, num_timesteps):
         paths = []
-        steps = 0
-        episode = 0
-        while steps < num_timesteps:
-            # print("Running an episode after completing {} timesteps".format(steps))
-            # sys.stdout.flush()
-            paths.append(self.episode())
-            steps += len(paths[episode][self.ordering["rewards"]])
-            episode += 1
+        if self.args.parallel_balancing == "timesteps":  # for equal timestep rollouts
+            steps_episodes_rewards = np.zeros(2, dtype=np.int)
+            steps = 0
+            while steps < num_timesteps:
+                path, reward = self.episode(num_timesteps - steps)
+                steps += path.shape[0]
+                paths.append(path)
+                if (steps < num_timesteps):  # only record full episodes for averaging!
+                    steps_episodes_rewards[0] += 1
+                    steps_episodes_rewards[1] += reward
+        elif self.args.parallel_balancing == "episodes":  # for equal number of episode rollouts
+            steps_episodes_rewards = np.zeros(3, dtype=np.int)
+            while steps_episodes_rewards[0] < num_timesteps:
+                path, reward = self.episode()
+                steps_episodes_rewards[0] += path.shape[0]
+                paths.append(path)
+                steps_episodes_rewards[1] += 1
+                steps_episodes_rewards[2] += reward
+        else:
+            print("*** Problem in rollout(): invalid parallel balancing strategy")
+            exit()
+        paths = np.concatenate(paths, 0)
+        return paths, steps_episodes_rewards
 
-        self.average_timesteps_in_episode = sum([len(path[self.ordering["rewards"]]) for path in paths]) / len(paths)
-        return paths
+    def learn(self, paths, episodes_rewards):
+        obs_n = paths[:, self.col_orderings['obs']]
+        action_n = paths[:, self.col_orderings['actions']]
+        action_dist_mu = paths[:, self.col_orderings['action_dists_mu']]
+        action_dist_logstd = paths[:, self.col_orderings['action_dists_logstd']]
+        advant_n = paths[:, self.col_orderings['advantage']].ravel()
+        features = paths[:, self.col_orderings['features']]
+        returns = paths[:, self.col_orderings['returns']]
 
-    def learn(self, paths):
-        # puts all the experiences in a matrix: total_timesteps x options
-        action_dist_mu = np.concatenate([path[self.ordering["action_dists_mu"]] for path in paths])
-        action_dist_logstd = np.concatenate([path[self.ordering["action_dists_logstd"]] for path in paths])
-        obs_n = np.concatenate([path[self.ordering["obs"]] for path in paths])
-        action_n = np.concatenate([path[self.ordering["actions"]] for path in paths])
+        # logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
+        # logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
+        # logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
+        # logging.debug("In Learn: action_n.shape = {}".format(action_n.shape))
+        # logging.debug("In Learn: advant_n.shape = {}".format(advant_n.shape))
+        # logging.debug("In Learn: features.shape = {}".format(features.shape))
+        # logging.debug("In Learn: returns.shape = {}".format(returns.shape))
 
-        # standardize to mean 0 stddev 1
-        advant_n = np.concatenate([path[self.ordering["advantage"]] for path in paths])
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
 
         # train value function / baseline on rollout paths
-        self.vf.fit(paths)
+        self.vf.fit(features, returns)
 
-        feed_dict = {self.obs: obs_n, self.action: action_n, self.advantage: advant_n,
-                     self.oldaction_dist_mu: action_dist_mu, self.oldaction_dist_logstd: action_dist_logstd}
+        feed_dict = {self.net.obs: obs_n,
+                     self.net.action: action_n,
+                     self.net.advantage: advant_n,
+                     self.net.oldaction_dist_mu: action_dist_mu,
+                     self.net.oldaction_dist_logstd: action_dist_logstd}
 
         # parameters
         thprev = self.gf()
@@ -225,16 +247,27 @@ class TRPO():
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
-        # episoderewards = np.array([path["rewards"].sum() for path in paths])
-        episoderewards = np.array([path[self.ordering["rewards"]].sum() for path in paths])
+        # mean rewards per full episode in this iteration
+        if episodes_rewards[0] == 0:
+            episoderewards = 0
+        else:
+            episoderewards = episodes_rewards[1] / episodes_rewards[0]
         stats = {}
-        stats["Average sum of rewards per episode"] = episoderewards.mean()
+        stats["Avg_Reward"] = episoderewards
         stats["Entropy"] = entropy_after
         stats["Max KL"] = self.args.max_kl
-        stats["Timesteps"] = sum([len(path[self.ordering["rewards"]]) for path in paths])
-        stats["KL between old and new distribution"] = kl_after
+        stats["Timesteps"] = paths.shape[0]
+        stats["Delta_KL"] = kl_after
         stats["Surrogate loss"] = surrogate_after
+        stats["Episodes"] = int(episodes_rewards[0])
         return self.get_policy(), stats
+
+    def save_weights(self, checkpoint_name):
+        try:
+            save_path = self.saver.save(self.session, os.path.join(CHECKPOINT_DIR, checkpoint_name))
+            logging.info("Saved model to {}".format(save_path))
+        except Exception as e:
+            logging.error("Unable to save checkpoint {}".format(e))
 
     def get_starting_weights(self):
         return self.get_policy()

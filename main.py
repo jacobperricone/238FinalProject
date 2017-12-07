@@ -5,7 +5,7 @@ from utils import *
 import os
 import time
 from Agents.TRPOAgentDiscrete import TRPO as TRPOD
-from Agents.TRPOAgentNew  import TRPO
+from Agents.TRPOAgent  import TRPO
 import argparse
 import logging
 import json
@@ -13,17 +13,18 @@ from mpi4py import MPI
 import sys
 
 comm = MPI.COMM_WORLD
-cpu = MPI.Get_processor_name()
 rank = comm.Get_rank()
-size = comm.Get_size()
-# print("Hello world from processor {}, process {} out of {}".format(cpu,rank,size))
+comm_size = comm.Get_size()
+# cpu = MPI.Get_processor_name()
+# print("Hello world from processor {}, process {} out of {}".format(cpu,rank,comm_size))
 # sys.stdout.flush()
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+RESULTS_DIR = os.path.join(os.getcwd(), 'Results')
+if not os.path.exists(RESULTS_DIR):
+    os.mkdir(RESULTS_DIR)
 
 parser = argparse.ArgumentParser(description='TRPO.')
-
-# these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
 parser.add_argument("--timesteps_per_batch", type=int, default=40000)
 parser.add_argument("--n_steps", type=int, default=1000000000)
@@ -31,23 +32,14 @@ parser.add_argument("--n_iter", type=int, default=100)
 parser.add_argument("--gamma", type=float, default=.995)
 parser.add_argument("--max_kl", type=float, default=.01)
 parser.add_argument("--cg_damping", type=float, default=0.1)
-parser.add_argument("--num_threads", type=int, default=1)
 parser.add_argument("--monitor", type=bool, default=False)
 parser.add_argument("--parallel_balancing", type=str, default="timesteps") # timesteps, episodes
+parser.add_argument("--discrete", type=bool, default=True)
 
-# change these parameters for testing
+# change these parameters for hyperparameter adaptation (kvfrans)
 parser.add_argument("--decay_method", type=str, default="none") # adaptive, none
 parser.add_argument("--timestep_adapt", type=int, default=0)
 parser.add_argument("--kl_adapt", type=float, default=0)
-parser.add_argument("--discrete", type=bool, default=True)
-
-
-
-RESULTS_DIR = os.path.join(os.getcwd(), 'Results')
-if not os.path.exists(RESULTS_DIR):
-    os.mkdir(RESULTS_DIR)
-
-
 
 args = parser.parse_args()
 args.max_pathlength = gym.spec(args.task).timestep_limit
@@ -67,7 +59,6 @@ if rank == 0:
     new_policy_weights = learner.get_starting_weights()
 else:
     new_policy_weights = None
-
 
 start_time = time.time()
 history = {}
@@ -106,7 +97,7 @@ while isDone == 0:
 
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
-    data_paths, data_rewards = learner.rollout(args.timesteps_per_batch / size)
+    data_paths, data_rewards = learner.rollout(args.timesteps_per_batch / comm_size)
     rollout_time = (time.time() - rollout_start)
 
     # gathering of experience on root process
@@ -153,9 +144,8 @@ while isDone == 0:
             rew += history['mean_reward'][it]*history['episodes'][it]
             it -= 1
         print(("Cumulative Reward Statistics:"))
-        print(("\tMaximum Avg_reward = %.3f from iteration %d" % (np.max(history["mean_reward"]), np.argmax(history["mean_reward"]))))
-        if ep >= 100:
-            print(("\tLast 100 Episode Avg_reward = %.3f" % (rew / ep)))
+        print(("\tMaximum Avg_reward = %.3f from iteration %d" % (np.max(history["mean_reward"]), 1+np.argmax(history["mean_reward"]))))
+        print(("\tLast %d Episode Avg_reward = %.3f" % (ep, (rew / ep))))
 
         print(("Cumulative Mean Timing Statistics:"))
         print(("\tBroadcast time = %.3f s" % np.mean(history["bcast_time"])))
@@ -164,8 +154,8 @@ while isDone == 0:
         print(("\tLearn time = %.3f s" % np.mean(history["learn_time"])))
         print(("\tTotal iteration time = %.3f s" % np.mean(history["iteration_time"])))
 
+        # hyperparameter adaptation (kvfrans)
         recent_total_reward += stats["Avg_Reward"]
-
         if args.decay_method == "adaptive":
             if iteration % 10 == 0:
                 if recent_total_reward < last_reward:
@@ -182,7 +172,6 @@ while isDone == 0:
                         args.max_kl += args.kl_adapt
                 last_reward = recent_total_reward
                 recent_total_reward = 0
-
         if args.decay_method == "adaptive-margin":
             if iteration % 10 == 0:
                 scaled_last = last_reward + abs(last_reward * 0.05)
@@ -204,9 +193,9 @@ while isDone == 0:
         # print(("Current step number is " + str(args.timesteps_per_batch) + " and KL is " + str(args.max_kl)))
 
         if iteration % 10 == 0:
-            with open("Results/%s-%d-%f-%d" % (args.task, starting_timesteps, starting_kl, size), "w") as outfile:
+            with open("Results/%s-%d-%f-%d" % (args.task, starting_timesteps, starting_kl, comm_size), "w") as outfile:
                 json.dump(history,outfile)
-            learner.save_weights("{}-{}-{}-{}_{}.ckpt".format(args.task, starting_timesteps, starting_kl, size, iteration))
+            learner.save_weights("{}-{}-{}-{}_{}.ckpt".format(args.task, starting_timesteps, starting_kl, comm_size, iteration))
 
         # statbar.add(1, [('Iteration Time',iteration_time ), ("Brodcast Time", bcast_start),
         #                  ("Rollout time", rollout_time), ("Gather Time", gather_time),
@@ -220,7 +209,6 @@ while isDone == 0:
     else:
         new_policy_weights = None
 
-    # Check for complete on all processes
     isDone = comm.bcast(isDone, root=0)
 
 if rank == 0:

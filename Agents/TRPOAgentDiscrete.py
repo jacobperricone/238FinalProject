@@ -4,18 +4,17 @@ import gym
 from utils import *
 from Networks.Baselines import *
 from Networks.ContinuousPolicy import NetworkDiscrete
-
 import time
 import os
 import logging
 import random
+import sys
 
 logging.getLogger().setLevel(logging.WARNING)
 
 CHECKPOINT_DIR = os.path.join(os.getcwd(), 'Checkpoints')
 if not os.path.exists(CHECKPOINT_DIR):
     os.mkdir(CHECKPOINT_DIR)
-
 
 class TRPO():
     def __init__(self, args, env):
@@ -29,29 +28,21 @@ class TRPO():
     def init_net(self):
         self.observation_shape = self.observation_space.shape
         self.observation_size = self.observation_shape[0]
-
         self.action_size = self.action_space.n
-        # self.action_size = self.action_space.n
-
-        self.net = NetworkDiscrete("discrete", self.env)
-
-
         keys = ['actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
         self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
         self.col_orderings['action_dists'] = list(range(self.observation_size * 2 + 3, self.observation_size * 2 + 3 + self.action_size))
         self.col_orderings = dict(self.col_orderings,
                                   **{keys[i]: [2 * self.observation_size + 3 + self.action_size + i] for i in range(len(keys))})
-        self.paths = []
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
         # Initialize Policy Network
         self.session = tf.Session(config=config)
+        self.net = NetworkDiscrete("discrete", self.env)
 
         # Calulate Surrogate Loss
-
-
         surr = self.calculate_surrogate_loss()
         kl, ent = self.calculate_KL_and_entropy()
         self.losses = [surr, kl, ent]
@@ -128,9 +119,7 @@ class TRPO():
         new_outputs = self.net.act(self.session, obs)
         return new_outputs
 
-    def episode(self, num_timesteps=0):
-        if num_timesteps == 0:
-            num_timesteps = self.args.max_pathlength-1
+    def episode(self, num_timesteps=sys.maxsize):
         obs, actions, action_dists, rewards, actions = [], [], [], [], []
         ob = list(filter(self.env.reset()))
         for i in range(self.args.max_pathlength - 1):
@@ -153,55 +142,49 @@ class TRPO():
                 features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
 
-                logging.info("In Episode: obs shape {}".format(obs.shape))
-                logging.info("In Episode: feat shape {}".format(features.shape))
-                logging.info("In Episode: actions {}".format(actions.shape))
-                logging.info("In Episode: returns {}".format(returns.shape))
-                logging.info("In Episode: advantage {}".format(advantage.shape))
-                logging.info("In Episode: advantage {}".format(action_dists.shape))
+                # logging.info("In Episode: obs shape {}".format(obs.shape))
+                # logging.info("In Episode: feat shape {}".format(features.shape))
+                # logging.info("In Episode: actions {}".format(actions.shape))
+                # logging.info("In Episode: returns {}".format(returns.shape))
+                # logging.info("In Episode: advantage {}".format(advantage.shape))
+                # logging.info("In Episode: advantage {}".format(action_dists.shape))
 
                 path = np.hstack((features, action_dists, actions, returns, advantage))
-
                 return path, rewards.sum()
 
     def rollout(self, num_timesteps):
-        # for equal timestep rollouts
         paths = []
-        episodes_rewards = np.zeros(2, dtype=np.int)
-        steps = 0
-        while steps < num_timesteps:
-            path, reward = self.episode(num_timesteps - steps)
-            steps += path.shape[0]
-            paths.append(path)
-            if (steps < num_timesteps):  # only record full episodes for averaging!
-                episodes_rewards[0] += 1
-                episodes_rewards[1] += reward
+        if self.args.parallel_balancing == "timesteps":  # for equal timestep rollouts
+            steps_episodes_rewards = np.zeros(2, dtype=np.int)
+            steps = 0
+            while steps < num_timesteps:
+                path, reward = self.episode(num_timesteps - steps)
+                steps += path.shape[0]
+                paths.append(path)
+                if (steps < num_timesteps):  # only record full episodes for averaging!
+                    steps_episodes_rewards[0] += 1
+                    steps_episodes_rewards[1] += reward
+        elif self.args.parallel_balancing == "episodes":  # for equal number of episode rollouts
+            steps_episodes_rewards = np.zeros(3, dtype=np.int)
+            while steps_episodes_rewards[0] < num_timesteps:
+                path, reward = self.episode()
+                steps_episodes_rewards[0] += path.shape[0]
+                paths.append(path)
+                steps_episodes_rewards[1] += 1
+                steps_episodes_rewards[2] += reward
+        else:
+            print("*** Problem in rollout(): invalid parallel balancing strategy")
+            exit()
         paths = np.concatenate(paths, 0)
-        return paths, episodes_rewards
-
-    # def rollout(self, num_timesteps):
-    #     # for equal number of episode rollouts
-    #     paths = []
-    #     steps_episodes_rewards = np.zeros(3, dtype=np.int)
-    #     while steps_episodes_rewards[0] < num_timesteps:
-    #         path, reward = self.episode()
-    #         steps_episodes_rewards[0] += path.shape[0]
-    #         paths.append(path)
-    #         steps_episodes_rewards[1] += 1
-    #         steps_episodes_rewards[2] += reward
-    #     paths = np.concatenate(paths, 0)
-    #     return paths, steps_episodes_rewards
+        return paths, steps_episodes_rewards
 
     def learn(self, paths, episodes_rewards):
-
         obs_n = paths[:, self.col_orderings['obs']]
         action_n = paths[:, self.col_orderings['actions']].ravel()
+        action_dist_n = paths[:, self.col_orderings['action_dists']]
         advant_n = paths[:, self.col_orderings['advantage']].ravel()
         features = paths[:, self.col_orderings['features']]
         returns = paths[:, self.col_orderings['returns']]
-        action_dist_n = paths[:, self.col_orderings['action_dists']]
-
-        # print(returns)
 
         # logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
         # logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))

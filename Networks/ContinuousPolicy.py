@@ -69,11 +69,8 @@ class NetworkDiscrete(object):
 
     def act(self, sess, obs, train = True):
         action_dist_n = sess.run(self.action_dist_n, {self.obs: obs})
-
         if train:
             action = int(cat_sample(action_dist_n)[0])
         else:
             action = int(np.argmax(action_dist_n))
-
         return action, action_dist_n
-
