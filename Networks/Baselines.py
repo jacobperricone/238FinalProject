@@ -61,9 +61,8 @@ class LinearVF(object):
     #     al = np.arange(o.shape[0]).reshape(-1, 1) / 100.0
     #     return np.concatenate([o, o**2, al, al**2, np.ones((o.shape[0], 1))], axis=1)
 
-    def fit(self, featmat, returns):   ### IS IT A PROBLEM TO COLLECT FEATURES ON FULL DATA SET??
+    def fit(self, featmat, returns):
         featmat = featmat.astype("float32")
-        # returns = returns
         n_col = featmat.shape[1]
         lamb = 2.0
         self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]

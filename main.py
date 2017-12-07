@@ -3,7 +3,6 @@ import tensorflow as tf
 import gym
 from utils import *
 from Agents.TRPOAgentNew import *
-# from Agents.TRPOAgent import *
 import argparse
 import json
 from mpi4py import MPI
@@ -22,8 +21,8 @@ parser = argparse.ArgumentParser(description='TRPO.')
 
 # these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
-parser.add_argument("--timesteps_per_batch", type=int, default=400)
-parser.add_argument("--n_steps", type=int, default=10000000)
+parser.add_argument("--timesteps_per_batch", type=int, default=25000)
+parser.add_argument("--n_steps", type=int, default=1000000000)
 parser.add_argument("--n_iter", type=int, default=100)
 parser.add_argument("--gamma", type=float, default=.995)
 parser.add_argument("--max_kl", type=float, default=.01)
@@ -57,9 +56,11 @@ history["rollout_time"] = []
 history["learn_time"] = []
 history["bcast_time"] = []
 history["gather_time"] = []
+history["iteration_time"] = []
 history["mean_reward"] = []
 history["timesteps"] = []
 history["maxkl"] = []
+history["episodes"] = []
 
 # start it off with a big negative number
 last_reward = -1000000
@@ -86,27 +87,26 @@ while isDone == 0:
 
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
-    data_paths, data_steps = learner.rollout(args.timesteps_per_batch / size)
+    data_paths, data_rewards = learner.rollout(args.timesteps_per_batch / size)
     rollout_time = (time.time() - rollout_start)
 
     # gathering of experience on root process
     gather_start = time.time()
-    sendcounts = np.array(comm.gather(data_steps[0], 0))
     if rank == 0:
-        paths = np.empty([np.sum(sendcounts), data_paths.shape[1]], dtype=float)
+        paths = np.empty([size*data_paths.shape[0], data_paths.shape[1]], dtype=np.float)
         episodes_rewards = np.empty(2, dtype = np.int)
-        sendcounts *= data_paths.shape[1]
     else:
         paths = None
         episodes_rewards = None
-    comm.Gatherv(data_paths, [paths, sendcounts], root = 0)
-    comm.Reduce(data_steps[1:3], episodes_rewards, op=MPI.SUM, root = 0)
+    comm.Gather(data_paths, paths, root = 0)
+    comm.Reduce(data_rewards, episodes_rewards, op=MPI.SUM, root = 0)
     gather_time = (time.time() - gather_start)
 
     # only master process does learning on TF graph
     if rank == 0:
         learn_start = time.time()
-        learner.adjust_kl(args.max_kl)
+        if args.decay_method != "none":
+            learner.adjust_kl(args.max_kl)
         new_policy_weights, stats = learner.learn(paths, episodes_rewards)
         learn_time = (time.time() - learn_start)
         iteration_time = rollout_time + learn_time + gather_time + bcast_time
@@ -115,7 +115,7 @@ while isDone == 0:
         print(("Reward Statistics:"))
         for k, v in stats.items():
             print("\t{} = {:.3f}".format(k,v))
-        print(("\nTiming Statistics:"))
+        print(("Timing Statistics:"))
         print(("\tBroadcast time = %.3f s" % bcast_time))
         print(("\tRollout time = %.3f s" % rollout_time))
         print(("\tGather time = %.3f s" % gather_time))
@@ -126,10 +126,18 @@ while isDone == 0:
         history["learn_time"].append(learn_time)
         history["bcast_time"].append(bcast_time)
         history["gather_time"].append(gather_time)
+        history["iteration_time"].append(rollout_time + learn_time + gather_time + bcast_time)
         history["mean_reward"].append(stats["Avg_Reward"])
         history["timesteps"].append(args.timesteps_per_batch)
         history["maxkl"].append(args.max_kl)
-        history["Episodes"].append(stats['Episodes'])
+        history["episodes"].append(stats['Episodes'])
+
+        print(("Cumulative Mean Timing Statistics:"))
+        print(("\tBroadcast time = %.3f s" % np.mean(history["bcast_time"])))
+        print(("\tRollout time = %.3f s" % np.mean(history["rollout_time"])))
+        print(("\tGather time = %.3f s" % np.mean(history["gather_time"])))
+        print(("\tLearn time = %.3f s" % np.mean(history["learn_time"])))
+        print(("\tTotal iteration time = %.3f s" % np.mean(history["iteration_time"])))
 
         recent_total_reward += stats["Avg_Reward"]
 
@@ -168,13 +176,11 @@ while isDone == 0:
                         args.max_kl += args.kl_adapt
                 last_reward = recent_total_reward
                 recent_total_reward = 0
-
         # print(("Current step number is " + str(args.timesteps_per_batch) + " and KL is " + str(args.max_kl)))
 
-        if iteration % 100 == 0:
+        if iteration % 10 == 0:
             with open("Results/%s-%s-%f-%f-%f-%f" % (args.task, args.decay_method, starting_timesteps, starting_kl, args.timestep_adapt, args.kl_adapt), "w") as outfile:
                 json.dump(history,outfile)
-
             learner.save_weights("iter_{}.ckpt".format(iteration))
 
         # statbar.add(1, [('Iteration Time',iteration_time ), ("Brodcast Time", bcast_start),
@@ -193,4 +199,4 @@ while isDone == 0:
     isDone = comm.bcast(isDone, root=0)
 
 if rank == 0:
-    print("Evaluation complete!")
+    print(("\n----- Evaluation complete! -----"))

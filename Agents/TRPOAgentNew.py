@@ -15,7 +15,6 @@ CHECKPOINT_DIR = os.path.join(os.getcwd(), 'Checkpoints')
 if not os.path.exists(CHECKPOINT_DIR):
     os.mkdir(CHECKPOINT_DIR)
 
-
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
@@ -116,7 +115,8 @@ class TRPO():
         act = action_dist_mu + np.exp(action_dist_logstd) * np.random.randn(*action_dist_logstd.shape)
         return act.ravel(), action_dist_mu, action_dist_logstd
 
-    def episode(self):
+    # def episode(self):
+    def episode(self, num_timesteps):
         obs, actions, rewards, action_dists_mu, action_dists_logstd = [], [], [], [], []
         ob = list(filter(self.env.reset()))
         for i in range(self.args.max_pathlength - 1):
@@ -128,7 +128,8 @@ class TRPO():
             res = self.env.step(int(action))
             ob = list(filter(res[0]))
             rewards.append((res[1]))
-            if res[2] or i == self.args.max_pathlength - 2:
+            # if res[2] or i == self.args.max_pathlength - 2:
+            if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps:
                 obs = np.concatenate(np.expand_dims(obs, 0))
                 action_dists_mu = np.concatenate(action_dists_mu)
                 action_dists_logstd = np.concatenate(action_dists_logstd)
@@ -141,28 +142,30 @@ class TRPO():
                 features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
 
-                logging.debug("In Episode: obs shape {}".format(obs.shape))
-                logging.debug("In Episode: feat shape {}".format(features.shape))
-                logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
-                logging.debug("In Episode: action_dists_logstd {}".format(action_dists_logstd.shape))
-                logging.debug("In Episode: actions {}".format(actions.shape))
-                logging.debug("In Episode: returns {}".format(returns.shape))
-                logging.debug("In Episode: advantage {}".format(advantage.shape))
+                # logging.debug("In Episode: obs shape {}".format(obs.shape))
+                # logging.debug("In Episode: feat shape {}".format(features.shape))
+                # logging.debug("In Episode: action_dists_mu shape {}".format(action_dists_mu.shape))
+                # logging.debug("In Episode: action_dists_logstd {}".format(action_dists_logstd.shape))
+                # logging.debug("In Episode: actions {}".format(actions.shape))
+                # logging.debug("In Episode: returns {}".format(returns.shape))
+                # logging.debug("In Episode: advantage {}".format(advantage.shape))
 
                 path = np.hstack((features, action_dists_mu, action_dists_logstd, actions, returns, advantage))
                 return path, rewards.sum()
 
     def rollout(self, num_timesteps):
         paths = []
-        steps_episodes_rewards = np.zeros(3, dtype=np.int)
-        while steps_episodes_rewards[0] < num_timesteps:
-            path, reward = self.episode()
+        episodes_rewards = np.zeros(2, dtype=np.int)
+        steps = 0
+        while steps < num_timesteps:
+            path, reward = self.episode(num_timesteps - steps - 1)
+            steps += path.shape[0]
             paths.append(path)
-            steps_episodes_rewards[0] += paths[steps_episodes_rewards[1]].shape[0]
-            steps_episodes_rewards[1] += 1
-            steps_episodes_rewards[2] += reward
+            if (steps < num_timesteps)
+                episodes_rewards[0] += 1
+                episodes_rewards[1] += reward
         paths = np.concatenate(paths, 0)
-        return paths, steps_episodes_rewards
+        return paths, episodes_rewards
 
     def learn(self, paths, episodes_rewards):
         obs_n = paths[:, self.col_orderings['obs']]
@@ -173,13 +176,13 @@ class TRPO():
         features = paths[:, self.col_orderings['features']]
         returns = paths[:, self.col_orderings['returns']]
 
-        logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
-        logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
-        logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
-        logging.debug("In Learn: action_n.shape = {}".format(action_n.shape))
-        logging.debug("In Learn: advant_n.shape = {}".format(advant_n.shape))
-        logging.debug("In Learn: features.shape = {}".format(features.shape))
-        logging.debug("In Learn: returns.shape = {}".format(returns.shape))
+        # logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
+        # logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
+        # logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
+        # logging.debug("In Learn: action_n.shape = {}".format(action_n.shape))
+        # logging.debug("In Learn: advant_n.shape = {}".format(advant_n.shape))
+        # logging.debug("In Learn: features.shape = {}".format(features.shape))
+        # logging.debug("In Learn: returns.shape = {}".format(returns.shape))
 
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
@@ -234,7 +237,7 @@ class TRPO():
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
-        # mean rewards per episode in this iteration
+        # mean rewards per full episode in this iteration
         episoderewards = episodes_rewards[1] / episodes_rewards[0]
 
         stats = {}
@@ -244,7 +247,7 @@ class TRPO():
         stats["Timesteps"] = paths.shape[0]
         stats["Delta_KL"] = kl_after
         stats["Surrogate loss"] = surrogate_after
-        stats["Episodes"] = episodes_rewards[0]
+        stats["Episodes"] = int(episodes_rewards[0])
         return self.get_policy(), stats
 
     def save_weights(self, checkpoint_name):
