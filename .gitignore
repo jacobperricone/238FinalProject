@@ -1,0 +1,5 @@
+.idea/
+*.pyc
+Checkpoints/
+.idea/workspace.xml
+Results/
