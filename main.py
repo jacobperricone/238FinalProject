@@ -29,6 +29,7 @@ parser.add_argument("--max_kl", type=float, default=.01)
 parser.add_argument("--cg_damping", type=float, default=0.1)
 parser.add_argument("--num_threads", type=int, default=1)
 parser.add_argument("--monitor", type=bool, default=False)
+parser.add_argument("--parallel_balancing", type=str, default="timesteps") # timesteps, episodes
 
 # change these parameters for testing
 parser.add_argument("--decay_method", type=str, default="none") # adaptive, none
@@ -36,7 +37,6 @@ parser.add_argument("--timestep_adapt", type=int, default=0)
 parser.add_argument("--kl_adapt", type=float, default=0)
 
 args = parser.parse_args()
-# args.timesteps_per_batch = round(args.timesteps_per_batch*(1-0.8**size)/(1-0.8)/size)*size  # adjust number of timesteps_per_batch for comm.Get_size()
 args.max_pathlength = gym.spec(args.task).timestep_limit
 if rank == 0:
     print(args)
@@ -93,7 +93,7 @@ while isDone == 0:
 
     # gathering of experience on root process
     gather_start = time.time()
-    paths, episodes_rewards = gather_paths(data_paths, data_rewards, comm, size, rank)
+    paths, episodes_rewards = gather_paths(data_paths, data_rewards, comm, rank, args.parallel_balancing)
     gather_time = (time.time() - gather_start)
 
     # only master process does learning on TF graph
