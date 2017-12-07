@@ -54,11 +54,10 @@ class TRPO():
         self.pg = flatgrad(surr, var_list)
 
         # KL divergence w/ itself, with first argument kept constant.
-        eps = 1e-6
+        eps = 1e-8
         kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
             self.net.action_dist_n) * tf.log(
             tf.stop_gradient(self.net.action_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
-
         # gradient of KL w/ itself
         grads = tf.gradients(kl_firstfixed, var_list)
         # what vector we're multiplying by
@@ -88,7 +87,6 @@ class TRPO():
 
     def calculate_surrogate_loss(self):
         # what are the probabilities of taking self.action, given new and old distributions
-
         N = self.net.batch_size
         p_n = slice_2d(self.net.action_dist_n, tf.range(0, N), self.net.action)
         old_pn = slice_2d(self.net.oldaction_dist_n, tf.range(0, N), self.net.action)
@@ -100,10 +98,13 @@ class TRPO():
     def calculate_KL_and_entropy(self):
         eps = 1e-8
         # kl divergence and shannon entropy
+        kl = tf.reduce_sum(self.net.oldaction_dist_n *
+                           tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
+        ent = tf.reduce_sum(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps)) / batch_size_float
 
-        kl = tf.reduce_mean(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps)))
-        ent = tf.reduce_mean(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps))
-
+		# kl = tf.reduce_mean(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps)))
+        # ent = tf.reduce_mean(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps))
+        
         return kl, ent
 
     def init_work(self):
@@ -204,9 +205,9 @@ class TRPO():
                      self.net.action: action_n,
                      self.net.advantage: advant_n,
                      self.net.oldaction_dist_n: action_dist_n}
+        # for k,v in feed_dict.items():
+        #     logging.debug(v.shape)
 
-        for k,v in feed_dict.items():
-            logging.debug(v.shape)
         # parameters
         thprev = self.gf()
 
@@ -214,7 +215,6 @@ class TRPO():
         def fisher_vector_product(p):
             feed_dict[self.flat_tangent] = p
             return self.session.run(self.fvp, feed_dict) + p * self.args.cg_damping
-
         g = self.session.run(self.pg, feed_dict)
 
         # solve Ax = g, where A is Fisher information metrix and g is gradient of parameters

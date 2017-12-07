@@ -9,7 +9,6 @@ class NetworkContinous(object):
         self.env = env
         self.observation_size = self.env.observation_space.shape[0]
         self.action_size = int(np.prod(self.env.action_space.shape))
-
         self.hidden_size = 64
         weight_init = tf.random_uniform_initializer(-0.05, 0.05)
         bias_init = tf.constant_initializer(0)
@@ -56,14 +55,14 @@ class NetworkDiscrete(object):
             self.advantage = tf.placeholder(tf.float32, [None])
             self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size], name = "old_action")
 
-
             self.action_dist_n, _ = (pt.wrap(self.obs).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
+                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
+                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
+                                # fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
+                                # fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
                                 softmax_classifier(self.action_size))
 
             self.batch_size =  tf.shape(self.obs)[0]
-
 
             self.var_list = [v for v in tf.trainable_variables() if v.name.startswith(scope)]
 

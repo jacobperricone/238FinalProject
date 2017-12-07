@@ -7,7 +7,6 @@ import scipy.signal
 def gauss_selfKL_firstfixed(mu, logstd):
     mu1, logstd1 = list(map(tf.stop_gradient, [mu, logstd]))
     mu2, logstd2 = mu, logstd
-
     return gauss_KL(mu1, logstd1, mu2, logstd2)
 
 # probability to take action x, given paramaterized guassian distribution
