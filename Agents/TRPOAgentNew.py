@@ -129,7 +129,7 @@ class TRPO():
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             # if res[2] or i == self.args.max_pathlength - 2:
-            if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps:
+            if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps - 1:
                 obs = np.concatenate(np.expand_dims(obs, 0))
                 action_dists_mu = np.concatenate(action_dists_mu)
                 action_dists_logstd = np.concatenate(action_dists_logstd)
@@ -158,10 +158,10 @@ class TRPO():
         episodes_rewards = np.zeros(2, dtype=np.int)
         steps = 0
         while steps < num_timesteps:
-            path, reward = self.episode(num_timesteps - steps - 1)
+            path, reward = self.episode(num_timesteps - steps)
             steps += path.shape[0]
             paths.append(path)
-            if (steps < num_timesteps):
+            if (steps < num_timesteps):  # only record full episodes for averaging!
                 episodes_rewards[0] += 1
                 episodes_rewards[1] += reward
         paths = np.concatenate(paths, 0)
@@ -238,8 +238,10 @@ class TRPO():
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
         # mean rewards per full episode in this iteration
-        episoderewards = episodes_rewards[1] / episodes_rewards[0]
-
+        if episodes_rewards[0] == 0:
+            episoderewards = 0
+        else:
+            episoderewards = episodes_rewards[1] / episodes_rewards[0]
         stats = {}
         stats["Avg_Reward"] = episoderewards
         stats["Entropy"] = entropy_after

@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description='TRPO.')
 
 # these parameters should stay the same
 parser.add_argument("--task", type=str, default='SpaceInvaders-ram-v0')
-parser.add_argument("--timesteps_per_batch", type=int, default=25000)
+parser.add_argument("--timesteps_per_batch", type=int, default=40000)
 parser.add_argument("--n_steps", type=int, default=1000000000)
 parser.add_argument("--n_iter", type=int, default=100)
 parser.add_argument("--gamma", type=float, default=.995)
@@ -36,6 +36,7 @@ parser.add_argument("--timestep_adapt", type=int, default=0)
 parser.add_argument("--kl_adapt", type=float, default=0)
 
 args = parser.parse_args()
+# args.timesteps_per_batch = round(args.timesteps_per_batch*(1-0.8**size)/(1-0.8)/size)*size  # adjust number of timesteps_per_batch for comm.Get_size()
 args.max_pathlength = gym.spec(args.task).timestep_limit
 if rank == 0:
     print(args)
@@ -131,6 +132,19 @@ while isDone == 0:
         history["timesteps"].append(args.timesteps_per_batch)
         history["maxkl"].append(args.max_kl)
         history["episodes"].append(stats['Episodes'])
+
+        # compute 100 episode average reward
+        ep = 0
+        it = iteration-1
+        rew = 0
+        while ep < 100 and it >= 0:
+            ep += history['episodes'][it]
+            rew += history['mean_reward'][it]*history['episodes'][it]
+            it -= 1
+        print(("Cumulative Reward Statistics:"))
+        print(("\tMaximum Avg_reward = %.3f from iteration %d" % (np.max(history["mean_reward"]), np.argmax(history["mean_reward"]))))
+        if ep >= 100:
+            print(("\tLast 100 Episode Avg_reward = %.3f" % (rew / ep)))
 
         print(("Cumulative Mean Timing Statistics:"))
         print(("\tBroadcast time = %.3f s" % np.mean(history["bcast_time"])))
