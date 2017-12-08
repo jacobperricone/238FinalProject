@@ -159,14 +159,14 @@ class GetFlat(object):
 class GetPolicyWeights(object):
     def __init__(self, session, var_list):
         self.session = session
-        self.op = [var for var in var_list if 'policy' in var.name]
+        self.op = [var for var in var_list ]
     def __call__(self):
         return self.session.run(self.op)
 
 class SetPolicyWeights(object):
     def __init__(self, session, var_list):
         self.session = session
-        self.policy_vars = [var for var in var_list if 'policy' in var.name]
+        self.policy_vars = [var for var in var_list]
         self.placeholders = {}
         self.assigns = []
         for var in self.policy_vars:

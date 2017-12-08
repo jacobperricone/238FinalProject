@@ -16,6 +16,7 @@ CHECKPOINT_DIR = os.path.join(os.getcwd(), 'Checkpoints')
 if not os.path.exists(CHECKPOINT_DIR):
     os.mkdir(CHECKPOINT_DIR)
 
+
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
@@ -32,9 +33,11 @@ class TRPO():
         keys = ['actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
         self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
-        self.col_orderings['action_dists'] = list(range(self.observation_size * 2 + 3, self.observation_size * 2 + 3 + self.action_size))
+        self.col_orderings['action_dists'] = list(
+            range(self.observation_size * 2 + 3, self.observation_size * 2 + 3 + self.action_size))
         self.col_orderings = dict(self.col_orderings,
-                                  **{keys[i]: [2 * self.observation_size + 3 + self.action_size + i] for i in range(len(keys))})
+                                  **{keys[i]: [2 * self.observation_size + 3 + self.action_size + i] for i in
+                                     range(len(keys))})
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
@@ -44,7 +47,10 @@ class TRPO():
 
         # Calulate Surrogate Loss
         surr = self.calculate_surrogate_loss()
-        kl, ent = self.calculate_KL_and_entropy()
+        kl = tf.reduce_mean(self.calculate_KL(self.net.oldaction_dist_n, self.net.action_dist_n), axis=0)
+        ent = tf.reduce_mean(self.calculate_entropy(self.net.action_dist_n), axis=0)
+
+        # kl, ent = self.calculate_KL_and_entropy()
         self.losses = [surr, kl, ent]
 
         var_list = self.net.var_list
@@ -53,12 +59,9 @@ class TRPO():
         self.pg = flatgrad(surr, var_list)
 
         # KL divergence w/ itself, with first argument kept constant.
-        eps = 1e-8
-        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
-        kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
-            self.net.action_dist_n) * tf.log(
-            tf.stop_gradient(self.net.action_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
-        # gradient of KL w/ itself
+
+        action_fixed = tf.stop_gradient(self.net.action_dist_n)
+        kl_firstfixed = tf.reduce_mean(self.calculate_KL(action_fixed, self.net.action_dist_n))
         grads = tf.gradients(kl_firstfixed, var_list)
         # what vector we're multiplying by
         self.flat_tangent = tf.placeholder(tf.float32, [None])
@@ -95,18 +98,16 @@ class TRPO():
         surr = -tf.reduce_mean(ratio * self.net.advantage)
         return surr
 
-    def calculate_KL_and_entropy(self):
+    def calculate_KL(self, prob0, prob1):
         eps = 1e-8
-        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
         # kl divergence and shannon entropy
-        kl = tf.reduce_sum(self.net.oldaction_dist_n *
-                           tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
-        ent = tf.reduce_sum(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps)) / batch_size_float
+        kl = tf.reduce_sum(prob0 * tf.log((prob0 + eps) / (prob1 + eps)), axis=1)
+        return kl
 
-		# kl = tf.reduce_mean(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps)))
-        # ent = tf.reduce_mean(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps))
-
-        return kl, ent
+    def calculate_entropy(self, prob):
+        eps = 1e-8
+        ent = -tf.reduce_sum(prob * tf.log(prob + eps), axis=1)
+        return ent
 
     def init_work(self):
         if self.args.monitor:
@@ -135,7 +136,7 @@ class TRPO():
             if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps - 1:
                 obs = np.concatenate(np.expand_dims(obs, 0))
                 action_dists = np.concatenate(action_dists)
-                actions = np.expand_dims(np.array(actions),-1)
+                actions = np.expand_dims(np.array(actions), -1)
                 rewards = np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
                 rewards, returns = map(lambda x: np.expand_dims(x, -1), [rewards, returns])
@@ -214,6 +215,7 @@ class TRPO():
         def fisher_vector_product(p):
             feed_dict[self.flat_tangent] = p
             return self.session.run(self.fvp, feed_dict) + p * self.args.cg_damping
+
         g = self.session.run(self.pg, feed_dict)
 
         # solve Ax = g, where A is Fisher information metrix and g is gradient of parameters
