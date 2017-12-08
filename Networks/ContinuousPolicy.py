@@ -48,22 +48,21 @@ class NetworkDiscrete(object):
         self.action_size = self.env.action_space.n
         self.hidden_size = 32
 
-        with tf.variable_scope("%s_shared" % scope):
-            self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
-            self.action = tf.placeholder(tf.int64, [None])
-            self.advantage = tf.placeholder(tf.float32, [None])
-            self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size], name = "old_action")
 
-            self.action_dist_n, _ = (pt.wrap(self.obs).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
-                                # fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
-                                # fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
-                                softmax_classifier(self.action_size))
+        self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
+        self.action = tf.placeholder(tf.int64, [None])
+        self.advantage = tf.placeholder(tf.float32, [None])
+        self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size], name = "old_action")
+        weight_init = tf.random_uniform_initializer(-0.05, 0.05)
+        bias_init = tf.constant_initializer(0)
+        h1 = fully_connected(self.obs, self.observation_size, self.hidden_size, weight_init, bias_init, "{}_policy_h1".format(scope))
+        h1 = tf.nn.relu(h1)
+        h2 = fully_connected(h1, self.hidden_size, self.action_size, weight_init, bias_init, "{}_policy_h2".format(scope))
+        self.action_dist_n = tf.nn.softmax(h2)
 
-            self.batch_size =  tf.shape(self.obs)[0]
+        self.batch_size =  tf.shape(self.obs)[0]
 
-            self.var_list = [v for v in tf.trainable_variables() if v.name.startswith(scope)]
+        self.var_list = [v for v in tf.trainable_variables()]
 
     def act(self, sess, obs, train = True):
         action_dist_n = sess.run(self.action_dist_n, {self.obs: obs})

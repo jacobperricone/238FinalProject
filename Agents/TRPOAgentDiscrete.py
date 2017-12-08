@@ -8,6 +8,7 @@ import time
 import os
 import logging
 import random
+import random
 import sys
 
 logging.getLogger().setLevel(logging.WARNING)
@@ -54,6 +55,8 @@ class TRPO():
 
         var_list = self.net.var_list
 
+        # var_list = self.net.var_list
+
         # policy gradient
         self.pg = flatgrad(surr, var_list)
 
@@ -85,6 +88,7 @@ class TRPO():
         # value function
         self.vf = LinearVF()
         self.get_policy = GetPolicyWeights(self.session, var_list)
+        self.set_policy = SetPolicyWeights(self.session, var_list)
 
     def calculate_surrogate_loss(self):
         # what are the probabilities of taking self.action, given new and old distributions
@@ -110,15 +114,21 @@ class TRPO():
     def init_work(self):
         if self.args.monitor:
             self.env.monitor.start('monitor/', force=True)
-        self.set_policy = SetPolicyWeights(self.session, self.net.var_list)
+
 
     def set_policy_weights(self, parameters):
-        self.set_policy(parameters)
+        self.sff(parameters)
+        # self.set_policy(parameters)
 
     def act(self, obs):
-        obs = np.expand_dims(obs, 0)
-        new_outputs = self.net.act(self.session, obs)
-        return new_outputs
+        obs = np.expand_dims(obs,0)
+        action_dist_n = self.session.run(self.net.action_dist_n, {self.net.obs: obs})
+        if random.random() < 1:
+            action = int(cat_sample(action_dist_n)[0])
+        else:
+            action = int(np.argmax(action_dist_n))
+        return action, action_dist_n
+
 
     def episode(self, num_timesteps=sys.maxsize):
         obs, actions, action_dists, rewards, actions = [], [], [], [], []
@@ -253,7 +263,8 @@ class TRPO():
         stats["Delta_KL"] = kl_after
         stats["Surrogate loss"] = surrogate_after
         stats["Episodes"] = int(episodes_rewards[0])
-        return self.get_policy(), stats
+        return theta, stats
+
 
     def save_weights(self, checkpoint_name):
         try:
@@ -263,7 +274,7 @@ class TRPO():
             logging.error("Unable to save checkpoint {}".format(e))
 
     def get_starting_weights(self):
-        return self.get_policy()
+        return self.gf()
 
     def adjust_kl(self, kl_new):
         self.args.max_kl = kl_new

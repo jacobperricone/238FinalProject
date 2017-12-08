@@ -86,7 +86,7 @@ def flatgrad(loss, var_list):
     grads = tf.gradients(loss, var_list)
     return tf.concat([tf.reshape(grad, [numel(v)]) for (v, grad) in zip(var_list, grads)], 0)
 
-def conjugate_gradient(f_Ax, b, cg_iters=10, residual_tol=1e-10):
+def conjugate_gradient(f_Ax, b, cg_iters=15, residual_tol=1e-10):
     # in numpy
     p = b.copy()
     r = b.copy()
@@ -122,7 +122,6 @@ def linesearch(f, x, fullstep, expected_improve_rate):
 class SetFromFlat(object):
     def __init__(self, session, var_list):
         self.session = session
-        assigns = []
         shapes = list(map(var_shape, var_list))
         total_size = sum(np.prod(shape) for shape in shapes)
         self.theta = theta = tf.placeholder(tf.float32, [total_size])
@@ -148,14 +147,14 @@ class GetFlat(object):
 class GetPolicyWeights(object):
     def __init__(self, session, var_list):
         self.session = session
-        self.op = [var for var in var_list ]
+        self.op = [var for var in var_list  if 'policy' in var.name]
     def __call__(self):
         return self.session.run(self.op)
 
 class SetPolicyWeights(object):
     def __init__(self, session, var_list):
         self.session = session
-        self.policy_vars = [var for var in var_list]
+        self.policy_vars = [var for var in var_list if 'policy' in var.name]
         self.placeholders = {}
         self.assigns = []
         for var in self.policy_vars:
@@ -182,6 +181,9 @@ def fully_connected(input_layer, input_size, output_size, weight_init, bias_init
         # w = tf.Variable(xavier_initializer([input_size, output_size]), name="w")
         b = tf.get_variable("b", [output_size], initializer=bias_init)
     return tf.matmul(input_layer,w) + b
+
+
+
 
 def gather_paths(data_paths, data_steps, comm, rank, balancing):
     size = comm.Get_size()
