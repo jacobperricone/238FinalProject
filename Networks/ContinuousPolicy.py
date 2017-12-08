@@ -34,7 +34,6 @@ class NetworkContinous(object):
 
             self.var_list = [v for v in tf.trainable_variables() if v.name.startswith(scope)]
 
-
     def act(self, sess, obs):
         action_dist_mu, action_dist_logstd = sess.run([self.action_dist_mu, self.action_dist_logstd],
                                                               feed_dict={self.obs: obs})

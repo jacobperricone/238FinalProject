@@ -16,7 +16,6 @@ CHECKPOINT_DIR = os.path.join(os.getcwd(), 'Checkpoints')
 if not os.path.exists(CHECKPOINT_DIR):
     os.mkdir(CHECKPOINT_DIR)
 
-
 class TRPO():
     def __init__(self, args, env):
         self.observation_space = env.observation_space
@@ -59,7 +58,6 @@ class TRPO():
         self.pg = flatgrad(surr, var_list)
 
         # KL divergence w/ itself, with first argument kept constant.
-
         action_fixed = tf.stop_gradient(self.net.action_dist_n)
         kl_firstfixed = tf.reduce_mean(self.calculate_KL(action_fixed, self.net.action_dist_n))
         grads = tf.gradients(kl_firstfixed, var_list)
@@ -145,12 +143,12 @@ class TRPO():
                 features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
 
-                # logging.info("In Episode: obs shape {}".format(obs.shape))
-                # logging.info("In Episode: feat shape {}".format(features.shape))
-                # logging.info("In Episode: actions {}".format(actions.shape))
-                # logging.info("In Episode: returns {}".format(returns.shape))
-                # logging.info("In Episode: advantage {}".format(advantage.shape))
-                # logging.info("In Episode: advantage {}".format(action_dists.shape))
+                logging.info("In Episode: obs shape {}".format(obs.shape))
+                logging.info("In Episode: feat shape {}".format(features.shape))
+                logging.info("In Episode: actions {}".format(actions.shape))
+                logging.info("In Episode: returns {}".format(returns.shape))
+                logging.info("In Episode: advantage {}".format(advantage.shape))
+                logging.info("In Episode: advantage {}".format(action_dists.shape))
 
                 path = np.hstack((features, action_dists, actions, returns, advantage))
                 return path, rewards.sum()
@@ -167,6 +165,8 @@ class TRPO():
                 if (steps < num_timesteps):  # only record full episodes for averaging!
                     steps_episodes_rewards[0] += 1
                     steps_episodes_rewards[1] += reward
+            paths = np.concatenate(paths, 0)
+            return paths, steps_episodes_rewards
         elif self.args.parallel_balancing == "episodes":  # for equal number of episode rollouts
             steps_episodes_rewards = np.zeros(3, dtype=np.int)
             while steps_episodes_rewards[0] < num_timesteps:
@@ -175,11 +175,11 @@ class TRPO():
                 paths.append(path)
                 steps_episodes_rewards[1] += 1
                 steps_episodes_rewards[2] += reward
+            paths = np.concatenate(paths, 0)
+            return paths, steps_episodes_rewards
         else:
             print("*** Problem in rollout(): invalid parallel balancing strategy")
             exit()
-        paths = np.concatenate(paths, 0)
-        return paths, steps_episodes_rewards
 
     def learn(self, paths, episodes_rewards):
         obs_n = paths[:, self.col_orderings['obs']]
@@ -189,13 +189,12 @@ class TRPO():
         features = paths[:, self.col_orderings['features']]
         returns = paths[:, self.col_orderings['returns']]
 
-        # logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
-        # logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
-        # logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
-        # logging.debug("In Learn: action_n.shape = {}".format(action_n.shape))
-        # logging.debug("In Learn: advant_n.shape = {}".format(advant_n.shape))
-        # logging.debug("In Learn: features.shape = {}".format(features.shape))
-        # logging.debug("In Learn: returns.shape = {}".format(returns.shape))
+        logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
+        logging.debug("In Learn: action_dist_n.shape = {}".format(action_dist_n.shape))
+        logging.debug("In Learn: action_n.shape = {}".format(action_n.shape))
+        logging.debug("In Learn: advant_n.shape = {}".format(advant_n.shape))
+        logging.debug("In Learn: features.shape = {}".format(features.shape))
+        logging.debug("In Learn: returns.shape = {}".format(returns.shape))
 
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
@@ -216,19 +215,13 @@ class TRPO():
             feed_dict[self.flat_tangent] = p
             return self.session.run(self.fvp, feed_dict) + p * self.args.cg_damping
 
-        g = self.session.run(self.pg, feed_dict)
-
         # solve Ax = g, where A is Fisher information metrix and g is gradient of parameters
-        # stepdir = A_inverse * g = x
+        g = self.session.run(self.pg, feed_dict)
         stepdir = conjugate_gradient(fisher_vector_product, -g)
 
         # let stepdir =  change in theta / direction that theta changes in
         # KL divergence approximated by 0.5 x stepdir_transpose * [Fisher Information Matrix] * stepdir
-        # where the [Fisher Information Matrix] acts like a metric
-        # ([Fisher Information Matrix] * stepdir) is computed using the function,
-        # and then stepdir * [above] is computed manually.
         shs = 0.5 * stepdir.dot(fisher_vector_product(stepdir))
-
         lm = np.sqrt(shs / self.args.max_kl)
         # if self.args.max_kl > 0.001:
         #     self.args.max_kl *= self.args.kl_anneal
@@ -241,18 +234,10 @@ class TRPO():
             self.sff(th)
             return self.session.run(self.losses[0], feed_dict)
 
-        # # New loss for diff line search
-        # def loss2(th):
-        #     self.sff(th)
-        #     # surrogate loss: policy gradient loss
-        #     return self.session.run(self.losses, feed_dict)
-
         # finds best parameter by starting with a big step and working backwards
         theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir / lm)
-        # theta = linesearch2(loss2, thprev, fullstep, negative_g_dot_steppdir, self.args.max_kl)
         # theta = thprev + fullstep  # stupid idea from continuous code
         self.sff(theta)
-
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
 
         # mean rewards per full episode in this iteration
