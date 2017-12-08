@@ -1,5 +1,9 @@
 .idea/
-*.pyc
-Checkpoints/
 .idea/workspace.xml
-Results/
+*.pyc
+*/*.pyc
+Checkpoints/*
+Results/*
+Logs/*
+__pycache__/
+*/__pycache__/

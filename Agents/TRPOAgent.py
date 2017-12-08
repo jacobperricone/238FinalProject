@@ -46,13 +46,13 @@ class TRPO():
         kl, ent = self.calculate_KL_and_entropy()
         self.losses = [surr, kl, ent]
 
-        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
         var_list = self.net.var_list
 
         # policy gradient
         self.pg = flatgrad(surr, var_list)
 
         # KL divergence w/ itself, with first argument kept constant.
+        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
         kl_firstfixed = gauss_selfKL_firstfixed(self.net.action_dist_mu, self.net.action_dist_logstd) / batch_size_float
         # gradient of KL w/ itself
         grads = tf.gradients(kl_firstfixed, var_list)
@@ -234,15 +234,15 @@ class TRPO():
         fullstep = stepdir / lm
         negative_g_dot_steppdir = -g.dot(stepdir)
 
+        # surrogate loss: policy gradient loss
         def loss(th):
             self.sff(th)
-            # surrogate loss: policy gradient loss
             return self.session.run(self.losses[0], feed_dict)
 
         # finds best parameter by starting with a big step and working backwards
         theta = linesearch(loss, thprev, fullstep, negative_g_dot_steppdir / lm)
-        # i guess we just take a fullstep no matter what
-        theta = thprev + fullstep
+        # # i guess we just take a fullstep no matter what
+        # theta = thprev + fullstep
         self.sff(theta)
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)

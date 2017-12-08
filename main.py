@@ -143,6 +143,9 @@ while isDone == 0:
             ep += history['episodes'][it]
             rew += history['mean_reward'][it]*history['episodes'][it]
             it -= 1
+        if ep == 0:
+            print("*** Problem: no complete episodes collected, increase timesteps_per_batch!")
+            exit()
         print(("Cumulative Reward Statistics:"))
         print(("\tMaximum Avg_reward = %.3f from iteration %d" % (np.max(history["mean_reward"]), 1+np.argmax(history["mean_reward"]))))
         print(("\tLast %d Episode Avg_reward = %.3f" % (ep, (rew / ep))))

@@ -19,7 +19,6 @@ def gauss_log_prob(mu, logstd, x):
 def gauss_KL(mu1, logstd1, mu2, logstd2):
     var1 = tf.exp(2*logstd1)
     var2 = tf.exp(2*logstd2)
-
     kl = tf.reduce_sum(logstd2 - logstd1 + (var1 + tf.square(mu1 - mu2))/(2*var2) - 0.5)
     return kl
 
@@ -120,7 +119,6 @@ def linesearch(f, x, fullstep, expected_improve_rate):
             return xnew
     return x
 
-
 def linesearch2(f, x, fullstep, expected_improve_rate, max_kl):
     max_backtracks = 10
     fval, old_kl, entropy = f(x)
@@ -128,7 +126,7 @@ def linesearch2(f, x, fullstep, expected_improve_rate, max_kl):
         xnew = x + stepfrac * fullstep
         newfval, new_kl, new_ent= f(xnew)
         if newfval<fval and new_kl<=max_kl:
-            max_kl *=1.002
+            max_kl *= 1.002
             return xnew
     return x
 
