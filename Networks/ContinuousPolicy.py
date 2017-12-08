@@ -46,29 +46,61 @@ class NetworkDiscrete(object):
         self.env = env
         self.observation_size = self.env.observation_space.shape[0]
         self.action_size = self.env.action_space.n
-        self.hidden_size = 32
+        self.hidden_size = 64
 
-        with tf.variable_scope("%s_shared" % scope):
-            self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
-            self.action = tf.placeholder(tf.int64, [None])
-            self.advantage = tf.placeholder(tf.float32, [None])
-            self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size], name = "old_action")
+        # with tf.variable_scope("%s_shared" % scope):
+        #     self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
+        #     self.action = tf.placeholder(tf.int64, [None])
+        #     self.advantage = tf.placeholder(tf.float32, [None])
+        #     self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size], name = "old_action")
+        #     self.action_dist_n, _ = (pt.wrap(self.obs).
+        #                         fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
+        #                         fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
+        #                         softmax_classifier(self.action_size))
 
-            self.action_dist_n, _ = (pt.wrap(self.obs).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
-                                fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
-                                # fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
-                                # fully_connected(self.hidden_size, activation_fn=tf.nn.relu).
-                                softmax_classifier(self.action_size))
+        self.obs= tf.placeholder(
+            tf.float32, shape=[None, 2 * self.observation_size + self.action_size])
+        self.action = tf.placeholder(tf.int64, shape=[None])
+        self.advantage = tf.placeholder(tf.float32, shape=[None])
+        self.oldaction_dist_n = tf.placeholder(tf.float32, shape=[None, self.action_size])
 
-            self.batch_size =  tf.shape(self.obs)[0]
+        self.prev_obs = np.zeros((1, self.observation_size))
+        self.prev_action = np.zeros((1, self.action_size))
 
-            self.var_list = [v for v in tf.trainable_variables() if v.name.startswith(scope)]
+        # self.obs = obs = tf.placeholder(
+        #     dtype, shape=[
+        #         None, 2 * env.observation_space.shape[0] + env.action_space.n], name="obs")
+        # self.prev_obs = np.zeros((1, env.observation_space.shape[0]))
+        # self.prev_action = np.zeros((1, env.action_space.n))
+        # self.action = action = tf.placeholder(tf.int64, shape=[None], name="action")
+        # self.advant = advant = tf.placeholder(dtype, shape=[None], name="advant")
+        # self.oldaction_dist = oldaction_dist = tf.placeholder(dtype, shape=[None, env.action_space.n], name="oldaction_dist")
+
+        # Create neural network.
+        self.action_dist_n, _ = (pt.wrap(self.obs).
+                            fully_connected(self.hidden_size = 64, activation_fn=tf.nn.tanh).
+                            softmax_classifier(self.action_size))
+
+        self.batch_size =  tf.shape(self.obs)[0]
+        # self.var_list = [v for v in tf.trainable_variables() if v.name.startswith(scope)]
+        self.var_list = tf.trainable_variables()
 
     def act(self, sess, obs, train = True):
-        action_dist_n = sess.run(self.action_dist_n, {self.obs: obs})
+        self.prev_obs = obs
+        obs_new = np.concatenate([obs, self.prev_obs, self.prev_action], 1)
+        action_dist_n = sess.run(self.action_dist_n, {self.obs: obs_new})
         if train:
             action = int(cat_sample(action_dist_n)[0])
         else:
             action = int(np.argmax(action_dist_n))
-        return action, action_dist_n
+        self.prev_action *= 0.0
+        self.prev_action[0, action] = 1.0
+        return action, action_dist_n, np.squeeze(obs_new)
+
+    # def act(self, sess, obs, train = True):
+    #     action_dist_n = sess.run(self.action_dist_n, {self.obs: obs})
+    #     if train:
+    #         action = int(cat_sample(action_dist_n)[0])
+    #     else:
+    #         action = int(np.argmax(action_dist_n))
+    #     return action, action_dist_n

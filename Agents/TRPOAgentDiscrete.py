@@ -29,14 +29,23 @@ class TRPO():
         self.observation_shape = self.observation_space.shape
         self.observation_size = self.observation_shape[0]
         self.action_size = self.action_space.n
-        keys = ['actions', 'returns', 'advantage']
-        self.col_orderings = {'obs': list(range(self.observation_size))}
-        self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
+        # keys = ['actions', 'returns', 'advantage']
+        # self.col_orderings = {'obs': list(range(self.observation_size))}
+        # self.col_orderings['features'] = list(range(self.observation_size * 2 + 3))
+        # self.col_orderings['action_dists'] = list(
+        #     range(self.observation_size * 2 + 3, self.observation_size * 2 + 3 + self.action_size))
+
+        self.col_orderings = {'obs': list(range(2 * self.observation_size + self.action_size))}
         self.col_orderings['action_dists'] = list(
-            range(self.observation_size * 2 + 3, self.observation_size * 2 + 3 + self.action_size))
+            range(2 * self.observation_size + self.action_size, 2 * self.observation_size + 2 * self.action_size))
+        self.col_orderings['features'] = list(range(2 * self.observation_size + 2 * self.action_size + 2))
+        keys = ['actions','returns', 'advantage']
         self.col_orderings = dict(self.col_orderings,
-                                  **{keys[i]: [2 * self.observation_size + 3 + self.action_size + i] for i in
+                                  **{keys[i]: [2 * self.observation_size + 2 * self.action_size + 2 + i] for i in
                                      range(len(keys))})
+####
+        # print(self.col_orderings)
+
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
@@ -83,7 +92,8 @@ class TRPO():
         self.session.run(tf.global_variables_initializer())
         self.saver = tf.train.Saver(var_list)
         # value function
-        self.vf = LinearVF()
+        self.vf = VF(self.session)
+        # self.vf = LinearVF()
         self.get_policy = GetPolicyWeights(self.session, var_list)
 
     def calculate_surrogate_loss(self):
@@ -123,14 +133,29 @@ class TRPO():
     def episode(self, num_timesteps=sys.maxsize):
         obs, actions, action_dists, rewards, actions = [], [], [], [], []
         ob = list(filter(self.env.reset()))
+
+        self.net.prev_action *= 0.0
+        self.net.prev_obs = np.multiply(self.net.prev_obs, 0.0, out=self.net.prev_obs, casting="unsafe")
+
         for i in range(self.args.max_pathlength - 1):
+            action, action_dist, ob = self.act(ob)
             obs.append(ob)
-            action, action_dist = self.act(ob)
             actions.append(action)
             action_dists.append(action_dist)
-            res = self.env.step(int(action))
-            ob = list(filter(res[0]))
-            rewards.append((res[1]))
+            res = self.env.step(action)
+            ob = res[0]
+            rewards.append(res[1])
+            # ob = list(filter(res[0]))
+            # rewards.append((res[1]))
+
+            # obs.append(ob)
+            # action, action_dist = self.act(ob)
+            # actions.append(action)
+            # action_dists.append(action_dist)
+            # res = self.env.step(action)
+            # ob = list(filter(res[0]))
+            # rewards.append((res[1]))
+
             if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps - 1:
                 obs = np.concatenate(np.expand_dims(obs, 0))
                 action_dists = np.concatenate(action_dists)
@@ -138,9 +163,12 @@ class TRPO():
                 rewards = np.array(rewards)
                 returns = discount(rewards, self.args.gamma)
                 rewards, returns = map(lambda x: np.expand_dims(x, -1), [rewards, returns])
-                range_array = np.arange(obs.shape[0]).reshape(-1, 1) / 100.0
+                # range_array = np.arange(obs.shape[0]).reshape(-1, 1) / 100.0
+                range_array = np.arange(obs.shape[0]).reshape(-1, 1) / 10.0
                 ones_array = np.ones((obs.shape[0], 1))
-                features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
+
+                # features = np.concatenate([obs, obs ** 2, range_array, range_array ** 2, ones_array], axis=1)
+                features = np.concatenate([obs, action_dists, range_array, ones_array], axis=1)
                 advantage = np.expand_dims(rewards.ravel() - self.vf.predict(features), -1)
 
                 logging.info("In Episode: obs shape {}".format(obs.shape))
@@ -150,7 +178,12 @@ class TRPO():
                 logging.info("In Episode: advantage {}".format(advantage.shape))
                 logging.info("In Episode: advantage {}".format(action_dists.shape))
 
-                path = np.hstack((features, action_dists, actions, returns, advantage))
+                # path = np.hstack((features, action_dists, actions, returns, advantage))
+                path = np.hstack((features, actions, returns, advantage))
+
+                self.net.prev_action *= 0.0
+                self.net.prev_obs = np.multiply(self.net.prev_obs, 0.0, out=self.net.prev_obs, casting="unsafe")
+
                 return path, rewards.sum()
 
     def rollout(self, num_timesteps):
@@ -166,6 +199,10 @@ class TRPO():
                     steps_episodes_rewards[0] += 1
                     steps_episodes_rewards[1] += reward
             paths = np.concatenate(paths, 0)
+
+# ####
+#             print("path size = {}".format(paths.shape))
+
             return paths, steps_episodes_rewards
         elif self.args.parallel_balancing == "episodes":  # for equal number of episode rollouts
             steps_episodes_rewards = np.zeros(3, dtype=np.int)
@@ -176,6 +213,10 @@ class TRPO():
                 steps_episodes_rewards[1] += 1
                 steps_episodes_rewards[2] += reward
             paths = np.concatenate(paths, 0)
+
+# ####
+#             print("path size = {}".format(paths.shape))
+
             return paths, steps_episodes_rewards
         else:
             print("*** Problem in rollout(): invalid parallel balancing strategy")
@@ -187,7 +228,7 @@ class TRPO():
         action_dist_n = paths[:, self.col_orderings['action_dists']]
         advant_n = paths[:, self.col_orderings['advantage']].ravel()
         features = paths[:, self.col_orderings['features']]
-        returns = paths[:, self.col_orderings['returns']]
+        returns = paths[:, self.col_orderings['returns']].ravel()
 
         logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
         logging.debug("In Learn: action_dist_n.shape = {}".format(action_dist_n.shape))

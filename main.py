@@ -89,11 +89,46 @@ logging.getLogger().setLevel(logging.WARNING)
 while isDone == 0:
     iteration += 1
 
+
+####
+
+    # if not 0:
+    #     print("Weights on rank = {} are {}".format(rank,new_policy_weights))
+        # if not new_policy_weights == None:
+        #     print("weights[0].type = {}".format(type(new_policy_weights[0])))
+        #     print("weights[0] = {}".format(new_policy_weights[0]))
+        # else:
+        #     print("weights = None on rank {}".format(rank))
+
     # synchronize model and update actor weights locally
     bcast_start = time.time()
     new_policy_weights = comm.bcast(new_policy_weights, root=0)
+
+####
+    # if not 0:
+    #     print("Weights on rank = {} are {}".format(rank,new_policy_weights))
+
+        # print("weights[0].type = {}".format(type(new_policy_weights[0])))
+        # print("weights[0] = {}".format(new_policy_weights[0]))
+
+    # parse list of lists
+
+
+    # new_policy_weights = comm.Bcast(new_policy_weights, root=0)
     learner.set_policy_weights(new_policy_weights)
     bcast_time = (time.time() - bcast_start)
+
+####
+    # if not 0:
+        # print("Weights on rank = {} are {}".format(rank,type(new_policy_weights)))
+
+        # print("Weights on rank = {} are {}".format(rank,new_policy_weights))
+
+        # print("weights[0].type = {}".format(type(new_policy_weights[0])))
+        # print("weights[0] = {}".format(new_policy_weights[0]))
+
+    # sys.stdout.flush()
+
 
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
     rollout_start = time.time()
