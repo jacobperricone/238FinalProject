@@ -14,7 +14,9 @@ import sys
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
+print(rank)
 comm_size = comm.Get_size()
+print(comm_size)
 # cpu = MPI.Get_processor_name()
 # print("Hello world from processor {}, process {} out of {}".format(cpu,rank,comm_size))
 # sys.stdout.flush()
@@ -89,10 +91,19 @@ logging.getLogger().setLevel(logging.WARNING)
 while isDone == 0:
     iteration += 1
 
+    if rank == 1:
+        print("old policy")
+        print(learner.get_policy()[-1])
+        print()
     # synchronize model and update actor weights locally
     bcast_start = time.time()
     new_policy_weights = comm.bcast(new_policy_weights, root=0)
     learner.set_policy_weights(new_policy_weights)
+    if rank == 1:
+        print("new policy")
+        print(learner.get_policy()[-1])
+        print()
+
     bcast_time = (time.time() - bcast_start)
 
     # start worker processes collect experience for a minimum args.timesteps_per_batch timesteps
@@ -111,6 +122,9 @@ while isDone == 0:
         if args.decay_method != "none":
             learner.adjust_kl(args.max_kl)
         new_policy_weights, stats = learner.learn(paths, episodes_rewards)
+
+        print("yoo policy")
+        print(new_policy_weights[-1])
         learn_time = (time.time() - learn_start)
         iteration_time = rollout_time + learn_time + gather_time + bcast_time
 

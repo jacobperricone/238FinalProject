@@ -2,6 +2,7 @@ from utils import *
 import numpy as np
 import tensorflow as tf
 import prettytensor as pt
+import random
 from utils import *
 
 class NetworkContinous(object):
@@ -67,7 +68,7 @@ class NetworkDiscrete(object):
 
     def act(self, sess, obs, train = True):
         action_dist_n = sess.run(self.action_dist_n, {self.obs: obs})
-        if train:
+        if random.random() < .9:
             action = int(cat_sample(action_dist_n)[0])
         else:
             action = int(np.argmax(action_dist_n))
