@@ -26,8 +26,8 @@ class TRPO():
         self.init_work()
 
     def init_net(self):
-        self.observation_shape = self.observation_space.shape
-        self.observation_size = self.observation_shape[0]
+        observation_shape = self.observation_space.shape
+        self.observation_size = observation_shape[0]
         self.action_size = self.action_space.n
         keys = ['actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
@@ -35,6 +35,7 @@ class TRPO():
         self.col_orderings['action_dists'] = list(range(self.observation_size * 2 + 3, self.observation_size * 2 + 3 + self.action_size))
         self.col_orderings = dict(self.col_orderings,
                                   **{keys[i]: [2 * self.observation_size + 3 + self.action_size + i] for i in range(len(keys))})
+
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
@@ -52,12 +53,27 @@ class TRPO():
         # policy gradient
         self.pg = flatgrad(surr, var_list)
 
-        # KL divergence w/ itself, with first argument kept constant.
-        eps = 1e-8
+        # KL divergence w/ itself, with first argument kept constant
+        eps = 1e-16
         batch_size_float = tf.cast(self.net.batch_size, tf.float32)
+
+####
         kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
             self.net.action_dist_n) * tf.log(
             tf.stop_gradient(self.net.action_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
+        # kl_firstfixed = tf.reduce_sum(tf.reduce_sum(tf.stop_gradient(self.net.action_dist_n) * tf.log(
+        #     tf.stop_gradient(self.net.action_dist_n + eps) / (self.net.action_dist_n + eps)), axis=1)) / batch_size_float
+
+        # ratio_n = tf.divide(tf.stop_gradient(self.net.action_dist_n), self.net.action_dist_n)
+        # kl_firstfixed = tf.nn.softmax_cross_entropy_with_logits(labels = self.net.action_dist_n, logits = ratio_n)
+
+        # N = self.net.batch_size
+        # p_n = slice_2d(self.net.action_dist_n, tf.range(0, N), self.net.action)
+        # Nf = tf.cast(N, tf.float32)
+        # kl_firstfixed = tf.reduce_sum(tf.stop_gradient(p_n) * tf.log(tf.stop_gradient(p_n + eps) / (p_n + eps))) / Nf
+
+        # kl_firstfixed = tf.reduce_mean(tf.stop_gradient(p_n) * tf.log(tf.stop_gradient(p_n + eps) / (p_n + eps)))
+
         # gradient of KL w/ itself
         grads = tf.gradients(kl_firstfixed, var_list)
         # what vector we're multiplying by
@@ -96,15 +112,31 @@ class TRPO():
         return surr
 
     def calculate_KL_and_entropy(self):
-        eps = 1e-8
-        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
         # kl divergence and shannon entropy
-        kl = tf.reduce_sum(self.net.oldaction_dist_n *
-                           tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
+        eps = 1e-16
+
+        # N = self.net.batch_size
+        # p_n = slice_2d(self.net.action_dist_n, tf.range(0, N), self.net.action)
+        # old_pn = slice_2d(self.net.oldaction_dist_n, tf.range(0, N), self.net.action)
+        # ratio = p_n / old_pn
+        # Nf = tf.cast(N, tf.float32)
+
+        # kl = tf.reduce_sum(old_pn * tf.log((old_pn + eps) / (p_n + eps))) / Nf
+        # ent = tf.reduce_sum(-p_n * tf.log(p_n + eps)) / Nf
+
+        # kl = tf.reduce_mean(old_pn * tf.log((old_pn + eps) / (p_n + eps)))
+        # ent = tf.reduce_mean(-p_n * tf.log(p_n + eps))
+
+        # kl = tf.contrib.distributions.kl(self.net.oldaction_dist_n, self.net.action_dist_n)
+        # ratio_n = tf.divide(self.net.oldaction_dist_n, self.net.action_dist_n)
+        # kl = tf.nn.softmax_cross_entropy_with_logits(labels = self.net.oldaction_dist_n, logits = ratio_n)
+
+        batch_size_float = tf.cast(self.net.batch_size, tf.float32)
+        # kl = tf.reduce_sum(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps))) / batch_size_float
+        kl = tf.reduce_sum(tf.reduce_sum(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps)), axis = 1)) / batch_size_float
         ent = tf.reduce_sum(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps)) / batch_size_float
 
-		# kl = tf.reduce_mean(self.net.oldaction_dist_n * tf.log((self.net.oldaction_dist_n + eps) / (self.net.action_dist_n + eps)))
-        # ent = tf.reduce_mean(-self.net.action_dist_n * tf.log(self.net.action_dist_n + eps))
+        # ent = tf.nn.softmax_cross_entropy_with_logits(labels = self.net.action_dist_n, logits = self.net.action_dist_n)
 
         return kl, ent
 
@@ -189,12 +221,25 @@ class TRPO():
         returns = paths[:, self.col_orderings['returns']]
 
         # logging.debug("In Learn: obs_n.shape = {}".format(obs_n.shape))
-        # logging.debug("In Learn: action_dist_mu.shape = {}".format(action_dist_mu.shape))
-        # logging.debug("In Learn: action_dist_logstd.shape = {}".format(action_dist_logstd.shape))
+        # logging.debug("In Learn: action_dist_n.shape = {}".format(action_dist_n.shape))
         # logging.debug("In Learn: action_n.shape = {}".format(action_n.shape))
         # logging.debug("In Learn: advant_n.shape = {}".format(advant_n.shape))
         # logging.debug("In Learn: features.shape = {}".format(features.shape))
         # logging.debug("In Learn: returns.shape = {}".format(returns.shape))
+
+        # print("In Learn: obs_n.shape = {}".format(obs_n.shape))
+        # print("In Learn: action_dist_n.shape = {}".format(action_dist_n.shape))
+        # print("In Learn: action_n.shape = {}".format(action_n.shape))
+        # print("In Learn: advant_n.shape = {}".format(advant_n.shape))
+        # print("In Learn: features.shape = {}".format(features.shape))
+        # print("In Learn: returns.shape = {}".format(returns.shape))
+
+        print("obs_n = {}".format(obs_n))
+        print("action_dist_n = {}".format(action_dist_n))
+        print("action_n = {}".format(action_n))
+        print("advant_n = {}".format(advant_n))
+        print("features = {}".format(features))
+        print("returns = {}".format(returns))
 
         advant_n -= advant_n.mean()
         advant_n /= (advant_n.std() + 1e-8)
@@ -214,7 +259,12 @@ class TRPO():
         def fisher_vector_product(p):
             feed_dict[self.flat_tangent] = p
             return self.session.run(self.fvp, feed_dict) + p * self.args.cg_damping
+
+        # computes policy gradient
         g = self.session.run(self.pg, feed_dict)
+
+####
+        # print("Before learning: self.losses = {}".format(self.losses))
 
         # solve Ax = g, where A is Fisher information metrix and g is gradient of parameters
         # stepdir = A_inverse * g = x
@@ -252,6 +302,9 @@ class TRPO():
         self.sff(theta)
 
         surrogate_after, kl_after, entropy_after = self.session.run(self.losses, feed_dict)
+
+####
+        # print("After learning: self.losses = {}".format(self.losses))
 
         # mean rewards per full episode in this iteration
         if episodes_rewards[0] == 0:

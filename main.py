@@ -34,7 +34,7 @@ parser.add_argument("--max_kl", type=float, default=.01)
 parser.add_argument("--cg_damping", type=float, default=0.1)
 parser.add_argument("--monitor", type=bool, default=False)
 parser.add_argument("--parallel_balancing", type=str, default="timesteps") # timesteps, episodes
-parser.add_argument("--discrete", type=bool, default=True)
+parser.add_argument("--discrete", type=int, default=1)
 
 # change these parameters for hyperparameter adaptation (kvfrans)
 parser.add_argument("--decay_method", type=str, default="none") # adaptive, none
@@ -110,6 +110,9 @@ while isDone == 0:
         learn_start = time.time()
         if args.decay_method != "none":
             learner.adjust_kl(args.max_kl)
+
+        print("paths.shape = {}".format(paths.shape))
+
         new_policy_weights, stats = learner.learn(paths, episodes_rewards)
         learn_time = (time.time() - learn_start)
         iteration_time = rollout_time + learn_time + gather_time + bcast_time

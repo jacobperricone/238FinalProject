@@ -26,8 +26,8 @@ class TRPO():
         self.init_work()
 
     def init_net(self):
-        self.observation_shape = self.observation_space.shape
-        self.observation_size = self.observation_shape[0]
+        observation_shape = self.observation_space.shape
+        self.observation_size = observation_shape[0]
         self.action_size = int(np.prod(self.action_space.shape))
         keys = ['action_dists_mu', 'action_dists_logstd', 'actions', 'returns', 'advantage']
         self.col_orderings = {'obs': list(range(self.observation_size))}
@@ -124,7 +124,8 @@ class TRPO():
             actions.append(action)
             action_dists_mu.append(action_dist_mu)
             action_dists_logstd.append(action_dist_logstd)
-            res = self.env.step(int(action))
+            # res = self.env.step(int(action))
+            res = self.env.step(action)
             ob = list(filter(res[0]))
             rewards.append((res[1]))
             if res[2] or i == self.args.max_pathlength - 2 or i == num_timesteps - 1:
@@ -214,6 +215,7 @@ class TRPO():
             feed_dict[self.flat_tangent] = p
             return self.session.run(self.fvp, feed_dict) + p * self.args.cg_damping
 
+        # computes policy gradient
         g = self.session.run(self.pg, feed_dict)
 
         # solve Ax = g, where A is Fisher information metrix and g is gradient of parameters

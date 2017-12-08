@@ -53,7 +53,8 @@ class NetworkDiscrete(object):
             self.obs = tf.placeholder(tf.float32, [None, self.observation_size])
             self.action = tf.placeholder(tf.int64, [None])
             self.advantage = tf.placeholder(tf.float32, [None])
-            self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size], name = "old_action")
+            # self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size], name = "old_action")
+            self.oldaction_dist_n = tf.placeholder(tf.float32, [None, self.action_size])
 
             self.action_dist_n, _ = (pt.wrap(self.obs).
                                 fully_connected(self.hidden_size, activation_fn=tf.nn.tanh).
