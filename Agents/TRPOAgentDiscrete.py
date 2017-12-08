@@ -78,7 +78,7 @@ class TRPO():
         # gradient of KL w/ itself * tangent
         gvp = [tf.reduce_sum(g * t) for (g, t) in zip(grads, tangents)]
         # 2nd gradient of KL w/ itself * tangent
-        self.fvp = flatgrad(gvp, var_list)
+        self.fvp = flatgrad(tf.add_n(gvp), var_list)
         # the actual parameter values
         self.gf = GetFlat(self.session, var_list)
         # call this to set parameter values
@@ -86,7 +86,7 @@ class TRPO():
         self.session.run(tf.global_variables_initializer())
         self.saver = tf.train.Saver(var_list)
         # value function
-        self.vf = LinearVF()
+        self.vf = VF_Bin(self.session, self.env.action_space.n)
         self.get_policy = GetPolicyWeights(self.session, var_list)
         self.set_policy = SetPolicyWeights(self.session, var_list)
 
@@ -160,7 +160,7 @@ class TRPO():
                 logging.info("In Episode: advantage {}".format(advantage.shape))
                 logging.info("In Episode: advantage {}".format(action_dists.shape))
 
-                path = np.hstack((features, action_dists, actions, returns, advantage))
+                path = np.hstack((features, action_dists, actions, rewards, advantage))
                 return path, rewards.sum()
 
     def rollout(self, num_timesteps):
